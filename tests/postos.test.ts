@@ -69,8 +69,16 @@ test('rota: só postos perto do caminho, desvio pesa no custo', () => {
   assert.ok(rows[0].extraKm < 1);
 });
 
+test('rótulo no medidor não é problema de combustível; aferição irregular é', async () => {
+  const { aboutFuel } = await import('../src/postos.ts');
+  assert.equal(aboutFuel('Combustível - Não identificar no equipamento medidor a origem'), false);
+  assert.equal(aboutFuel('Bomba Medidora - Aferição Irregular'), true);
+  assert.equal(aboutFuel('Combustível fora de especificação'), true);
+});
+
 test('infração só de documentos reduz a nota, mas não tira da recomendação', () => {
   const r = reliability(st('6', at(0, 0), {}, { n: 1, ult: '2026-08-01', ev: [['2026-08-01', 'I', 'Não possuir documentos necessários para outorga de autorização']] }), today);
   assert.equal(r.recentSerious, false);
-  assert.equal(r.score, 3.8);
+  assert.equal(r.score, 4.5);
+  assert.equal(r.level, 'ok');
 });

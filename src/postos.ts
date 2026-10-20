@@ -87,14 +87,16 @@ export function bboxAround(c: LatLon, km: number) {
 }
 
 /* ---------- confiabilidade ---------- */
-const PESO: Record<EventType, number> = { D: 2.2, S: 2.2, A: 1.6, I: 1.2, M: 0.4, N: 0.2 };
+// Infração ligada ao combustível ou à bomba pesa 1,2; a de papelada/cadastro, 0,5
+const PESO: Record<EventType, number> = { D: 2.2, S: 2.2, A: 1.6, I: 0.5, M: 0.15, N: 0.1 };
+const PESO_COMBUSTIVEL = 1.2;
 export const EVENT_LABEL: Record<EventType, string> = {
   I: 'Auto de infração', D: 'Interdição', A: 'Apreensão', S: 'Suspensão', N: 'Notificação', M: 'Medida reparadora',
 };
 
 /** Infração ligada ao combustível ou à bomba (qualidade/quantidade), não só a papelada. */
 export function aboutFuel(text: string): boolean {
-  return /volume|quantidade|qualidade|especifica|adulter|teor|massa espec|bomba|medi(dor|ç)|lacre|aferi|metrol|mistur|solvente|densidade|octan|metanol/i.test(text);
+  return /volume|quantidade|qualidade|especifica|adulter|teor|massa espec|afer(i|ç)|lacre|metanol|solvente|fraude|a menor/i.test(text);
 }
 
 function yearsBetween(a: string, b: string) {
@@ -126,10 +128,11 @@ export function reliability(s: Station, today: string, g?: { rating: number; cou
     const y = yearsBetween(date, today);
     if (y > 5) continue;
     const w = y < 1 ? 1 : y < 2 ? 0.7 : y < 3 ? 0.5 : 0.3;
-    anp -= PESO[t] * w;
+    const fuelIssue = t === 'I' && aboutFuel(text);
+    anp -= (fuelIssue ? PESO_COMBUSTIVEL : PESO[t]) * w;
     if (t === 'I') inf++;
     if (t === 'D' || t === 'S' || t === 'A') intd++;
-    if (y < 1 && (t === 'D' || t === 'S' || t === 'A' || (t === 'I' && aboutFuel(text)))) recentSerious = true;
+    if (y < 1 && (t === 'D' || t === 'S' || t === 'A' || fuelIssue)) recentSerious = true;
   }
   anp = Math.max(0, Math.min(5, anp));
   let google: number | null = null;
