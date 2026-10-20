@@ -353,3 +353,60 @@ export function recommend(rows: StationRow[]): Recommendation {
   const unsafe = all.filter((o) => o.rel.level === 'evitar').sort((a, b) => a.cost - b.cost)[0] ?? null;
   return { best, bestOther, cheaperUnsafe: unsafe && best && unsafe.cost < best.cost ? unsafe : null, considered: good.length };
 }
+
+/* ---------- casar postos do Google com os da ANP ---------- */
+export interface GoogleStation { id: string; name: string; address: string; lat: number; lon: number; rating: number | null; count: number }
+export interface GoogleMatch { id: string; name: string; rating: number | null; count: number; lat: number; lon: number }
+
+const STOP = new Set('posto postos auto autoposto ltda me epp eireli sa s a comercio com de da do das dos e combustiveis combustivel derivados petroleo servicos servico serv conveniencia rede abastecimento center centro and the loja filial'.split(' '));
+const BRANDS: Record<string, string> = { shell: 'Shell', raizen: 'Shell', ipiranga: 'Ipiranga', petrobras: 'Petrobras', br: 'Petrobras', vibra: 'Petrobras', ale: 'Ale', alesat: 'Ale' };
+
+function words(s: string): string[] {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+function nameTokens(s: string) {
+  return words(s).filter((w) => w.length >= 3 && !STOP.has(w) && !BRANDS[w] && !/^\d+$/.test(w));
+}
+function brandOf(s: string): string | null {
+  for (const w of words(s)) if (BRANDS[w]) return BRANDS[w];
+  return null;
+}
+
+/** Pontua o quanto um lugar do Google parece ser este posto (endereço, nome, bandeira e distância). */
+export function matchScore(g: GoogleStation, s: Station): number {
+  const d = haversineKm({ lat: s.la, lon: s.lo }, g);
+  const maxD = s.pg === 'n' ? 1.0 : 2.5; // ponto pelo bairro ou pela rua pode estar longe
+  if (d > maxD) return 0;
+  const gAddr = words(g.address);
+  const num = (s.e.match(/,\s*(\d{1,6})\s*$/) ?? [])[1];
+  const street = nameTokens(s.e.replace(/,\s*\d+\s*$/, ''));
+  const addr = !!num && gAddr.includes(num) && street.some((w) => gAddr.includes(w));
+  const gName = new Set(nameTokens(g.name));
+  const overlap = nameTokens(s.n).filter((w) => gName.has(w)).length;
+  const gBrand = brandOf(g.name), sBrand = s.b in { Shell: 1, Ipiranga: 1, Petrobras: 1, Ale: 1 } ? s.b : null;
+  let score = (addr ? 3 : 0) + Math.min(overlap, 2) * 1.5 + (gBrand && gBrand === sBrand ? 1 : 0);
+  score += d < 0.1 ? 2 : d < 0.25 ? 1.2 : d < 0.5 ? 0.6 : 0;
+  if (gBrand && sBrand && gBrand !== sBrand) score -= 2;
+  const evidence = addr || overlap > 0 || (gBrand && gBrand === sBrand) || d < 0.15;
+  return evidence && score >= 1.5 ? score : 0;
+}
+
+/** Liga cada lugar do Google a no máximo um posto da ANP (os pares mais parecidos primeiro). */
+export function matchGoogle(places: GoogleStation[], stations: Station[]): Map<string, GoogleMatch> {
+  const pairs: { g: GoogleStation; s: Station; v: number }[] = [];
+  for (const g of places) {
+    if (!Number.isFinite(g.lat) || !Number.isFinite(g.lon)) continue;
+    for (const s of stations) {
+      const v = matchScore(g, s);
+      if (v > 0) pairs.push({ g, s, v });
+    }
+  }
+  pairs.sort((a, b) => b.v - a.v);
+  const usedG = new Set<string>(), out = new Map<string, GoogleMatch>();
+  for (const { g, s } of pairs) {
+    if (usedG.has(g.id) || out.has(s.c)) continue;
+    usedG.add(g.id);
+    out.set(s.c, { id: g.id, name: g.name, rating: g.rating, count: g.count, lat: g.lat, lon: g.lon });
+  }
+  return out;
+}

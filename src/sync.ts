@@ -371,11 +371,12 @@ async function syncPlaces() {
   await setMeta(PLACES_KEY, cur);
 }
 
-/* ---------- notas do Google (opcional: só funciona com a chave configurada no servidor) ---------- */
-export interface GooglePlace { id: string; name: string; lat: number; lon: number; rating: number | null; count: number }
-export async function googleNearby(lat: number, lon: number, radius_m: number): Promise<{ configured: boolean; places: GooglePlace[] }> {
+/* ---------- Google Places (opcional: só funciona com a chave configurada no servidor) ---------- */
+export type GoogleMode = 'nearby' | 'posto' | 'address';
+/** Chama a função postos-google; sem login ou sem chave devolve configured=false. */
+export async function googlePlaces<T>(body: { mode: GoogleMode; lat?: number; lon?: number; radius_m?: number; query?: string }): Promise<{ configured: boolean; places: T[] }> {
   if (!(await currentSession())) return { configured: false, places: [] };
-  const { data, error } = await supabase.functions.invoke('postos-google', { body: { lat, lon, radius_m } });
+  const { data, error } = await supabase.functions.invoke('postos-google', { body });
   if (error) throw error;
-  return data as { configured: boolean; places: GooglePlace[] };
+  return data as { configured: boolean; places: T[] };
 }

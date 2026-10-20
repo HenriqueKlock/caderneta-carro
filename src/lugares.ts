@@ -1,6 +1,7 @@
 // Localização e mapas: GPS do aparelho, busca de endereço (Nominatim/OpenStreetMap),
 // rota entre casa e trabalho (OSRM, servidor público gratuito) e o arquivo público de postos.
 import { simplify, type LatLon, type StationsFile } from './postos';
+import { googlePlaces } from './sync';
 
 const NOMINATIM = 'https://nominatim.openstreetmap.org';
 const OSRM = 'https://router.project-osrm.org/route/v1/driving/';
@@ -58,6 +59,30 @@ export async function searchAddress(q: string, near?: LatLon | null): Promise<Fo
   } catch (e) {
     throw new Error(navigator.onLine === false ? 'Sem internet para buscar endereços.' : 'A busca de endereços não respondeu. Tente de novo.');
   }
+}
+
+interface GoogleAddress { id: string; name: string; address: string; lat: number; lon: number; route: string; hood: string; city: string; state: string; types: string[] }
+
+/** Busca no Google (mesma base do Google Maps) quando a chave está configurada; senão, no OpenStreetMap. */
+export async function searchPlaces(q: string, near?: LatLon | null): Promise<{ list: FoundPlace[]; source: 'google' | 'osm' }> {
+  try {
+    const res = await googlePlaces<GoogleAddress>({ mode: 'address', query: q, ...(near ? { lat: near.lat, lon: near.lon } : {}) });
+    if (res.configured) {
+      const list = res.places
+        .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon))
+        .map((p) => {
+          const isAddress = p.types.some((t) => ['street_address', 'premise', 'subpremise', 'route', 'sublocality', 'sublocality_level_1', 'neighborhood', 'locality', 'postal_code'].includes(t));
+          // Sem número da casa: guardamos rua e bairro (ou o nome do lugar, se for um estabelecimento)
+          const base = [p.route, p.hood].filter(Boolean).join(' · ');
+          const label = isAddress ? base || p.name : p.name + (p.route ? ' · ' + p.route : '');
+          return { lat: p.lat, lon: p.lon, label: label.slice(0, 100), detail: [isAddress ? '' : p.hood, p.city, p.state].filter(Boolean).join(', ') };
+        });
+      return { list, source: 'google' };
+    }
+  } catch (e) {
+    console.warn('busca no Google falhou; usando o OpenStreetMap', e);
+  }
+  return { list: await searchAddress(q, near), source: 'osm' };
 }
 
 export async function reverse(p: LatLon): Promise<FoundPlace> {

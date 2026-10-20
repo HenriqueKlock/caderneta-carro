@@ -1,11 +1,11 @@
 // Telas de postos: aba Postos, ficha do posto, "Outro local", Casa e trabalho e o card "Onde abastecer" do Início.
 import {
-  EVENT_LABEL, ageDays, bboxAround, bestWithoutPrice, haversineKm, recommend, sortRows, stationsFor, usageVerdict,
-  type StationUse,
+  EVENT_LABEL, ageDays, bboxAround, bestWithoutPrice, haversineKm, matchGoogle, recommend, sortRows, stationsFor, usageVerdict,
+  type GoogleMatch, type GoogleStation, type StationUse,
   type Base, type CarModel, type Fuel, type LatLon, type Option, type OwnPrice, type Recommendation, type Station, type StationRow, type StationsFile,
 } from './postos';
-import { gps, loadStations, reverse, route, searchAddress, type FoundPlace, type Route } from './lugares';
-import { currentSession, getPlaces, googleNearby, setPlace, type PlaceKind, type Places } from './sync';
+import { gps, loadStations, reverse, route, searchPlaces, type FoundPlace, type Route } from './lugares';
+import { currentSession, getPlaces, googlePlaces, setPlace, type PlaceKind, type Places } from './sync';
 import { ICON } from './icons';
 import type { FuelLog } from './db';
 
@@ -29,9 +29,14 @@ interface Ctx {
   usage: () => StationUse[];
 }
 
-/** Abre o posto no Google Maps (nota, fotos e o botão de rotas ficam lá). */
-export function mapsUrl(s: Station) {
-  return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent([s.n, s.e, s.m, 'SC'].filter(Boolean).join(', '));
+/**
+ * Abre o posto no Google Maps (nota, fotos e o botão de rotas ficam lá).
+ * Com o lugar do Google já identificado, abre exatamente ele; senão, pelo endereço
+ * (o nome do cadastro da ANP é a razão social e costuma não bater com o do Maps).
+ */
+export function mapsUrl(s: Station, g?: GoogleMatch) {
+  if (g) return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(g.name) + '&query_place_id=' + encodeURIComponent(g.id);
+  return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(['Posto', s.e, s.m, 'SC'].filter(Boolean).join(', '));
 }
 
 /** Texto do campo "Posto" no abastecimento: nome e endereço (dois postos podem ter o mesmo nome). */
@@ -67,7 +72,26 @@ export function initPostos(ctx: Ctx) {
   let other: FoundPlace | null = null;
   let showAll = false;
   let from = 'inicio';
+  /** Lugares do Google ligados aos postos da ANP (nome, nota, id), só durante o uso do app. */
+  const gmatch = new Map<string, GoogleMatch>();
   const google = new Map<string, { rating: number; count: number }>();
+  const gTried = new Set<string>();
+  const nm = (s: Station) => gmatch.get(s.c)?.name || s.n;
+  /** Postos com o ponto do Google quando já identificados (mais preciso que o endereço geocodificado). */
+  let adjusted: Station[] | null = null;
+  function stations(): Station[] {
+    if (!file) return [];
+    if (!gmatch.size) return file.postos;
+    if (!adjusted) adjusted = file.postos.map((s) => { const g = gmatch.get(s.c); return g ? { ...s, la: g.lat, lo: g.lon, pg: 'n' as const } : s; });
+    return adjusted;
+  }
+  function addMatches(m: Map<string, GoogleMatch>) {
+    if (m.size) adjusted = null;
+    for (const [c, g] of m) {
+      gmatch.set(c, g);
+      if (g.rating != null) google.set(c, { rating: g.rating, count: g.count });
+    }
+  }
   const googleDone = new Set<string>();
   let googleOn: boolean | null = null;
 
@@ -112,7 +136,7 @@ export function initPostos(ctx: Ctx) {
   }
 
   function compute(b: Base): { rows: StationRow[]; rec: Recommendation } {
-    const rows = stationsFor(file!.postos, b, ctx.car().model, ctx.own(), ctx.todayISO(), google);
+    const rows = stationsFor(stations(), b, ctx.car().model, ctx.own(), ctx.todayISO(), google);
     return { rows, rec: recommend(rows) };
   }
 
@@ -123,21 +147,14 @@ export function initPostos(ctx: Ctx) {
     if (googleDone.has(key) || navigator.onLine === false || !(await currentSession())) return;
     googleDone.add(key);
     try {
-      const res = await googleNearby(center.lat, center.lon, Math.round((radiusKm * 1000) / 1.3));
+      const res = await googlePlaces<GoogleStation>({ mode: 'nearby', lat: center.lat, lon: center.lon, radius_m: Math.round((radiusKm * 1000) / 1.3) });
       googleOn = res.configured;
       if (!res.configured) return;
-      const bb = bboxAround(center, radiusKm + 1);
-      const near = file.postos.filter((s) => s.la > bb.s && s.la < bb.n && s.lo > bb.w && s.lo < bb.e);
-      for (const g of res.places) {
-        if (g.rating == null || !Number.isFinite(g.lat)) continue;
-        let bestS: Station | null = null, bestD = 0.15;
-        for (const s of near) {
-          const d = haversineKm({ lat: s.la, lon: s.lo }, g);
-          if (d < bestD) { bestD = d; bestS = s; }
-        }
-        if (bestS) google.set(bestS.c, { rating: g.rating, count: g.count });
-      }
+      const bb = bboxAround(center, radiusKm + 3);
+      const near = file.postos.filter((s) => s.la > bb.s && s.la < bb.n && s.lo > bb.w && s.lo < bb.e && !gmatch.has(s.c));
+      addMatches(matchGoogle(res.places, near));
       render();
+      renderHome();
     } catch (e) {
       console.warn('google', e);
     }
@@ -204,11 +221,11 @@ export function initPostos(ctx: Ctx) {
       ? 'Etanol rende ' + Math.round((car.model.kmlE / car.model.kmlG) * 100) + '% da gasolina no ' + esc(car.name) + (car.model.measured ? ' (medido)' : ' (estimado)') + ' · conta ida e volta'
       : 'Conta ida e volta até o posto';
     const warn = rec.cheaperUnsafe
-      ? '<p class="rec-warn">' + ICON.warn + '<span>' + esc(rec.cheaperUnsafe.s.n) + ' sairia mais barato, mas ficou de fora: ' + (rec.cheaperUnsafe.rel.recentSerious ? 'teve autuação séria da ANP nos últimos 12 meses.' : 'confiabilidade baixa.') + '</span></p>'
+      ? '<p class="rec-warn">' + ICON.warn + '<span>' + esc(nm(rec.cheaperUnsafe.s)) + ' sairia mais barato, mas ficou de fora: ' + (rec.cheaperUnsafe.rel.recentSerious ? 'teve autuação séria da ANP nos últimos 12 meses.' : 'confiabilidade baixa.') + '</span></p>'
       : '';
     return (
       '<button type="button" class="rec-card" data-posto="' + best.s.c + '"><span class="l">' + REC_LABEL[kind] + '</span>' +
-      '<span class="t">' + FUEL[best.fuel] + ' no ' + esc(best.s.n) + '</span>' +
+      '<span class="t">' + FUEL[best.fuel] + ' no ' + esc(nm(best.s)) + '</span>' +
       '<span class="s">' + brl(best.price.price) + '/l · ' + dist + ' · confiabilidade ' + fmt(best.rel.score, 1) + '</span>' + save +
       '<span class="f">' + ratio + '</span></button>' + warn
     );
@@ -255,7 +272,7 @@ export function initPostos(ctx: Ctx) {
     const any = !!(r.gas || r.eth);
     const gasOn = any && ctx.car().model.fuels.includes('gasolina'), ethOn = any && ctx.car().model.fuels.includes('etanol');
     return (
-      '<button type="button" class="st-row" data-posto="' + r.s.c + '"><span class="h"><span class="n"><span>' + mineTag + esc(r.s.n) + '</span><span>' + sub + '</span></span>' + chipScore(r) + '</span>' +
+      '<button type="button" class="st-row" data-posto="' + r.s.c + '"><span class="h"><span class="n"><span>' + mineTag + esc(nm(r.s)) + '</span><span>' + sub + '</span></span>' + chipScore(r) + '</span>' +
       '<span class="p">' + (gasOn ? '<span><i class="dot gas"></i>' + priceTxt(r.gas) + '</span>' : '') + (ethOn ? '<span><i class="dot eth"></i>' + priceTxt(r.eth) + '</span>' : '') + src(p, today) + '</span></button>'
     );
   }
@@ -264,7 +281,7 @@ export function initPostos(ctx: Ctx) {
   function favorite(): { u: StationUse; s: Station } | null {
     if (!file) return null;
     for (const u of ctx.usage()) {
-      const s = file.postos.find((x) => x.c === u.station_id);
+      const s = stations().find((x) => x.c === u.station_id);
       if (s) return { u, s };
     }
     return null;
@@ -289,13 +306,13 @@ export function initPostos(ctx: Ctx) {
     else if (rec.best) {
       const diff = mine.cost - rec.best.cost;
       price = diff > 0.5
-        ? FUEL[mine.fuel] + ' a ' + brl(mine.price.price) + ': para rodar ' + km + ' km sai <b>≈ ' + brl(diff) + ' mais caro</b> que a melhor opção (' + esc(rec.best.s.n) + ').'
+        ? FUEL[mine.fuel] + ' a ' + brl(mine.price.price) + ': para rodar ' + km + ' km sai <b>≈ ' + brl(diff) + ' mais caro</b> que a melhor opção (' + esc(nm(rec.best.s)) + ').'
         : FUEL[mine.fuel] + ' a ' + brl(mine.price.price) + ': praticamente o mesmo custo da melhor opção.';
     }
     const v = usageVerdict(u);
     return (
       '<button type="button" class="card my-card" data-posto="' + s.c + '"><span class="l">Seu posto · ' + u.fills + (u.fills === 1 ? ' abastecimento' : ' abastecimentos') + ', o último em ' + dm(u.last) + '</span>' +
-      '<span class="t">' + esc(s.n) + '</span>' +
+      '<span class="t">' + esc(nm(s)) + '</span>' +
       '<span class="s">' + price + '</span>' +
       (v ? '<span class="s ' + v.tone + '">' + esc(v.text) + '</span>' : '') + '</button>'
     );
@@ -307,7 +324,7 @@ export function initPostos(ctx: Ctx) {
     if (!r) return '<div class="card my-card">' + head + '<span class="s">Os postos daqui não têm preço na pesquisa da ANP e nenhum passou na confiabilidade.</span></div>';
     return (
       '<button type="button" class="card my-card" data-posto="' + r.s.c + '">' + head +
-      '<span class="t">Melhor avaliado e mais perto: ' + esc(r.s.n) + '</span>' +
+      '<span class="t">Melhor avaliado e mais perto: ' + esc(nm(r.s)) + '</span>' +
       '<span class="s">Confiabilidade ' + fmt(r.rel.score, 1) + ' · ' + distTxt(r, b) + ' · <b>sem preço</b>: confira na bomba. O preço que você pagar fica registrado para as próximas vezes.</span></button>'
     );
   }
@@ -399,7 +416,7 @@ export function initPostos(ctx: Ctx) {
   /* ---------- ficha do posto ---------- */
   let shown: Station | null = null;
   function openPosto(cnpj: string) {
-    const s = file?.postos.find((x) => x.c === cnpj);
+    const s = stations().find((x) => x.c === cnpj);
     if (!s) return;
     shown = s;
     const today = ctx.todayISO();
@@ -418,11 +435,13 @@ export function initPostos(ctx: Ctx) {
       ? s.f.n + (s.f.n === 1 ? ' fiscalização' : ' fiscalizações') + ' em 5 anos · ' + (rel.infractions ? rel.infractions + (rel.infractions === 1 ? ' infração' : ' infrações') : 'nenhuma infração') + (rel.interdictions ? ' · ' + rel.interdictions + (rel.interdictions === 1 ? ' interdição ou apreensão' : ' interdições ou apreensões') : '')
       : 'Sem fiscalização registrada nos últimos 5 anos (nota neutra)';
     const g = google.get(s.c);
+    const gm = gmatch.get(s.c);
+    if (!gm && googleOn !== false && !gTried.has(s.c)) lookupStation(s);
     const mine = ctx.logsAt(s.c);
     const dist = 'base' in rs ? (b.kind === 'rota' ? (row.distKm < 0.15 ? 'no caminho' : '+' + kmTxt(row.extraKm) + ' de desvio') : kmTxt(row.distKm)) : '';
-    $('posto-title').textContent = s.n;
+    $('posto-title').textContent = nm(s);
     $('posto-body').innerHTML =
-      '<div class="ps-head"><h2>' + esc(s.n) + '</h2><span class="hint">' + [s.e, s.br, s.m].filter(Boolean).map(esc).join(', ') + '</span><span class="hint">' + [dist, s.b].filter(Boolean).map(esc).join(' · ') + (s.pg === 'b' ? ' · localização aproximada (bairro)' : '') + '</span></div>' +
+      '<div class="ps-head"><h2>' + esc(nm(s)) + '</h2>' + (gm && gm.name !== s.n ? '<span class="hint">No cadastro da ANP: ' + esc(s.n) + '</span>' : '') + '<span class="hint">' + [s.e, s.br, s.m].filter(Boolean).map(esc).join(', ') + '</span><span class="hint">' + [dist, s.b].filter(Boolean).map(esc).join(' · ') + (s.pg === 'b' ? ' · localização aproximada (bairro)' : '') + '</span></div>' +
       '<div class="price-grid">' + (car.fuels.includes('gasolina') ? priceCell('gasolina', row.gas) : '') + (car.fuels.includes('etanol') ? priceCell('etanol', row.eth) : '') + '</div>' +
       (extra ? '<p class="hint">Também: ' + esc(extra) + '</p>' : '') +
       (costs ? '<p class="hint">Para rodar ' + Math.round(car.kmTank) + ' km: ' + costs + (b.kind === 'rota' || 'base' in rs ? ' (com a ida e volta)' : '') + '</p>' : '') +
@@ -431,7 +450,7 @@ export function initPostos(ctx: Ctx) {
       '<div class="rel-part"><div class="h"><span>Fiscalização da ANP (5 anos)</span><b>' + fmt(rel.anp, 1) + '</b></div><div class="bar"><i style="width:' + Math.round((rel.anp / 5) * 100) + '%"></i></div><span class="hint">' + esc(anpTxt) + '</span></div>' +
       (ev.length ? '<ul class="ev-list">' + ev.slice(0, 6).map(([d, t, txt]) => '<li><span class="d">' + dm(d) + '/' + d.slice(2, 4) + '</span><span><b>' + EVENT_LABEL[t] + '</b>' + (txt ? ' · ' + esc(txt.replace(/^(Notificação|MRC)\s*-\s*(PR ?Comb\s*-\s*)?/i, '')) : '') + '</span></li>').join('') + '</ul>' : '') +
       '<div class="rel-part"><div class="h"><span>Avaliações no Google</span><b>' + (g ? fmt(g.rating, 1) : '–') + '</b></div>' +
-      (g ? '<div class="bar"><i style="width:' + Math.round((g.rating / 5) * 100) + '%"></i></div><span class="hint">' + fmt(g.rating, 1) + ' em ' + g.count.toLocaleString('pt-BR') + ' avaliações</span>' : '<span class="hint">' + (googleOn ? 'Não encontrei este posto no Google.' : 'Ainda não configurado: a nota usa só a fiscalização.') + '</span>') + '</div>' +
+      (g ? '<div class="bar"><i style="width:' + Math.round((g.rating / 5) * 100) + '%"></i></div><span class="hint">' + fmt(g.rating, 1) + ' em ' + g.count.toLocaleString('pt-BR') + ' avaliações</span>' : '<span class="hint">' + (googleOn ? (gTried.has(s.c) && !gm ? 'Não encontrei este posto no Google.' : 'Procurando no Google…') : googleOn === false ? 'Ainda não configurado: a nota usa só a fiscalização.' : 'Disponível com a conta conectada.') + '</span>') + '</div>' +
       '<details class="more"><summary>Como a nota é calculada<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></summary><p class="hint">Começa em 5 e cada ocorrência da ANP nos últimos 5 anos desconta, mais quanto mais recente e mais grave: interdição e apreensão pesam mais; infração ligada ao combustível pesa mais que infração de papelada; notificação e medida corretiva pesam pouco. Infração de aferição da bomba, volume ou qualidade do combustível nos últimos 12 meses limita a nota em 2,5 e tira o posto da recomendação. Com o Google ligado, a média das avaliações entra com peso de 35%, puxada para 4,0 quando há poucas avaliações.</p></details></div>' +
       '<div class="card"><span class="b15">Seus abastecimentos aqui</span>' +
       (() => {
@@ -442,9 +461,22 @@ export function initPostos(ctx: Ctx) {
       (mine.length ? '<ul class="ev-list">' + mine.slice(0, 5).map((f) => '<li><span class="d">' + dm(f.date) + '/' + f.date.slice(2, 4) + '</span><span>' + FUEL[f.fuel as Fuel] + ' · ' + brl(f.price_per_l) + '/l · ' + brl(f.total_brl) + '</span></li>').join('') + '</ul>' : '<span class="hint">Nenhum ainda. Abastecendo por aqui, o preço que você pagar passa a valer como o dado mais recente deste posto.</span>') + '</div>';
     ctx.openSheet('posto-sheet');
   }
+  /** Busca pontual de um posto que a busca por perto não trouxe (o Google devolve no máximo 20 por área). */
+  async function lookupStation(s: Station) {
+    gTried.add(s.c);
+    try {
+      const res = await googlePlaces<GoogleStation>({ mode: 'posto', query: 'posto de combustível ' + s.e + ', ' + s.m + ' SC', lat: s.la, lon: s.lo });
+      googleOn = res.configured;
+      if (res.configured) addMatches(matchGoogle(res.places, [s]));
+    } catch (e) {
+      console.warn('google', e);
+    }
+    if (shown?.c === s.c && $('posto-sheet').classList.contains('open')) openPosto(s.c);
+    render();
+  }
   $('posto-route').addEventListener('click', () => {
     if (!shown) return;
-    window.open(mapsUrl(shown), '_blank', 'noopener');
+    window.open(mapsUrl(shown, gmatch.get(shown.c)), '_blank', 'noopener');
   });
   $('posto-fill').addEventListener('click', () => {
     if (!shown) return;
@@ -495,7 +527,7 @@ export function initPostos(ctx: Ctx) {
     localBusy = true;
     renderLocal();
     try {
-      localResults = await searchAddress(q, here?.p ?? place('casa'));
+      localResults = (await searchPlaces(q, here?.p ?? place('casa'))).list;
       if (!localResults.length) ctx.toast('Nada encontrado. Tente com bairro e cidade.');
     } catch (err) {
       ctx.toast((err as Error).message);
@@ -523,6 +555,7 @@ export function initPostos(ctx: Ctx) {
   let found: FoundPlace[] = [];
   let busy = false;
   let routeMsg = '';
+  let searchSource: 'google' | 'osm' | null = null;
   function openLocais() {
     editing = place('casa') ? (place('trabalho') ? null : 'trabalho') : 'casa';
     found = [];
@@ -540,7 +573,7 @@ export function initPostos(ctx: Ctx) {
       if (editing !== k) return '<div class="pl-card">' + head + '</div>';
       return '<div class="pl-card editing">' + head +
         '<form class="pl-form" data-form="' + k + '"><input class="inp sm" name="q" placeholder="Rua e bairro, ou só o bairro" autocomplete="off" enterkeyhint="search" aria-label="Endereço ' + (k === 'casa' ? 'de casa' : 'do trabalho') + '"><button type="submit" class="btn primary sm"' + (busy ? ' disabled' : '') + '>Buscar</button></form>' +
-        (found.length ? '<div class="list-card">' + found.map((x, i) => '<button type="button" class="row simple" data-found="' + i + '"><span class="mid"><span class="a">' + esc(x.label) + '</span><span class="b">' + esc(x.detail) + '</span></span><span></span><span class="chev">' + ICON.chev + '</span></button>').join('') + '</div>' : '') +
+        (found.length ? '<div class="list-card">' + found.map((x, i) => '<button type="button" class="row simple" data-found="' + i + '"><span class="mid"><span class="a">' + esc(x.label) + '</span><span class="b">' + esc(x.detail) + '</span></span><span></span><span class="chev">' + ICON.chev + '</span></button>').join('') + '</div>' + (searchSource === 'google' ? '<span class="hint">Resultados do Google</span>' : searchSource === 'osm' ? '<span class="hint">Resultados do OpenStreetMap</span>' : '') : '') +
         '<div class="pl-actions"><button type="button" class="link-btn" data-here="' + k + '">' + TARGET + ' Usar onde estou agora</button>' +
         (p ? '<button type="button" class="link-btn muted" data-del="' + k + '">Remover</button>' : '') + '<button type="button" class="link-btn muted" data-cancel>Cancelar</button></div></div>';
     };
@@ -553,7 +586,7 @@ export function initPostos(ctx: Ctx) {
       '<div class="card"><div class="switch-row"><div class="t"><span>Postos no caminho</span><span>' + (both ? 'Entre casa e trabalho, sem desviar muito' : 'Cadastre casa e trabalho para ligar') + '</span></div><input type="checkbox" class="switch" role="switch" id="l-route" aria-label="Postos no caminho"' + (on ? ' checked' : '') + (both ? '' : ' disabled') + '></div>' +
       (on ? '<div class="field"><span>Desvio máximo</span><div class="chips" id="l-detour">' + DETOURS.map((d) => '<button type="button" data-detour="' + d + '" aria-selected="' + (d === det) + '">' + (d < 1000 ? d + ' m' : d / 1000 + ' km') + '</button>').join('') + '</div></div>' +
         '<span class="hint">' + esc(routeMsg || (r && r.pts.length > 1 ? 'Caminho de ' + fmt(r.km, 1) + ' km (≈ ' + r.min + ' min) calculado.' : 'Calculando o caminho…')) + '</span>' : '') + '</div>' +
-      '<p class="foot-note lock">' + ICON.lock + '<span>Salvos na sua conta, só você acessa. Guardamos a rua e o ponto no mapa, sem número. O endereço vai ao OpenStreetMap só na hora de buscar, e o caminho é calculado uma vez pelo OSRM.</span></p>';
+      '<p class="foot-note lock">' + ICON.lock + '<span>Salvos na sua conta, só você acessa. Guardamos a rua e o ponto no mapa, sem número. O endereço vai ao serviço de mapas (Google, ou OpenStreetMap se o Google não estiver ligado) só na hora de buscar, e o caminho é calculado uma vez pelo OSRM.</span></p>';
     const input = document.querySelector<HTMLInputElement>('.pl-form input');
     if (input && keep) {
       input.value = keep.value;
@@ -636,7 +669,9 @@ export function initPostos(ctx: Ctx) {
     busy = true;
     renderLocais();
     try {
-      found = await searchAddress(q, place('casa') ?? place('trabalho') ?? here?.p);
+      const r = await searchPlaces(q, place('casa') ?? place('trabalho') ?? here?.p);
+      found = r.list;
+      searchSource = r.source;
       if (!found.length) ctx.toast('Nada encontrado. Tente com bairro e cidade.');
     } catch (err) {
       ctx.toast((err as Error).message);
@@ -671,7 +706,7 @@ export function initPostos(ctx: Ctx) {
     if (!rec.best) {
       const r = bestWithoutPrice(compute(rs.base).rows);
       el.innerHTML = r
-        ? '<button type="button" class="home-rec" data-postos="' + kind + '"><span class="l">Onde abastecer · ' + where + '</span><span class="t">' + esc(r.s.n) + '</span><span class="s">Sem preço recente nos postos daqui · melhor avaliado e mais perto (confiabilidade ' + fmt(r.rel.score, 1) + ')</span><span class="chev">' + ICON.chev + '</span></button>'
+        ? '<button type="button" class="home-rec" data-postos="' + kind + '"><span class="l">Onde abastecer · ' + where + '</span><span class="t">' + esc(nm(r.s)) + '</span><span class="s">Sem preço recente nos postos daqui · melhor avaliado e mais perto (confiabilidade ' + fmt(r.rel.score, 1) + ')</span><span class="chev">' + ICON.chev + '</span></button>'
         : head + '<p class="hint">Sem preço recente nos postos ' + where + '.</p>';
       return;
     }
@@ -679,7 +714,7 @@ export function initPostos(ctx: Ctx) {
     const dist = rs.base.kind === 'rota' ? (b.distKm < 0.15 ? 'no caminho' : '+' + kmTxt(b.extraKm)) : kmTxt(b.distKm);
     el.innerHTML =
       '<button type="button" class="home-rec" data-postos="' + kind + '"><span class="l">Onde abastecer · ' + where + '</span>' +
-      '<span class="t"><i class="dot ' + (b.fuel === 'gasolina' ? 'gas' : 'eth') + '"></i>' + FUEL[b.fuel] + ' no ' + esc(b.s.n) + '</span>' +
+      '<span class="t"><i class="dot ' + (b.fuel === 'gasolina' ? 'gas' : 'eth') + '"></i>' + FUEL[b.fuel] + ' no ' + esc(nm(b.s)) + '</span>' +
       '<span class="s">' + brl(b.price.price) + '/l · ' + dist + ' · confiabilidade ' + fmt(b.rel.score, 1) + '</span>' +
       (rec.bestOther ? '<span class="s save">' + brl(rec.bestOther.cost - b.cost) + ' a menos que ' + FUEL[rec.bestOther.fuel].toLowerCase() + ' para rodar ' + Math.round(ctx.car().model.kmTank) + ' km</span>' : '') +
       (() => {
@@ -688,7 +723,7 @@ export function initPostos(ctx: Ctx) {
         const o = rowFor(fav.s, rs.base).best;
         if (!o || o.stale) return '';
         const diff = o.cost - b.cost;
-        return diff > 0.5 ? '<span class="s">No seu posto (' + esc(fav.s.n) + ') sairia ≈ ' + brl(diff) + ' a mais.</span>' : '';
+        return diff > 0.5 ? '<span class="s">No seu posto (' + esc(nm(fav.s)) + ') sairia ≈ ' + brl(diff) + ' a mais.</span>' : '';
       })() +
       '<span class="chev">' + ICON.chev + '</span></button>';
   }

@@ -114,3 +114,20 @@ test('seu posto: mais usado e rendimento dos tanques que começaram nele', async
   assert.equal(usageVerdict(u[0])!.tone, 'neutral'); // 3,6% abaixo: ainda dentro do ruído
   assert.equal(usageVerdict(u[1])!.text.startsWith('1 tanque'), true);
 });
+
+test('Google: casa pelo endereço, pelo nome ou pela bandeira; não confunde bandeiras', async () => {
+  const { matchGoogle } = await import('../src/postos.ts');
+  const A = { ...st('A', at(0, 0), {}), n: 'Comercial Trindade de Combustiveis', b: 'Shell', e: 'Rua Lauro Linhares, 1288' };
+  const B = { ...st('B', at(0.4, 0), {}), n: 'Auto Posto Vovo', b: 'Ipiranga', e: 'Rua Lauro Linhares, 1619' };
+  const C = { ...st('C', at(1.5, 0), {}), n: 'Posto Exemplo', b: 'Bandeira branca', e: 'Rua Longe, 10', pg: 'b' as const };
+  const g = (id: string, name: string, address: string, dyKm: number) => ({ id, name, address, ...(({ la, lo }) => ({ lat: la, lon: lo }))(at(dyKm, 0)), rating: 4.5, count: 100 });
+  const m = matchGoogle([
+    g('g1', 'Posto Shell Select', 'R. Lauro Linhares, 1288 - Trindade, Florianópolis - SC', 0.35), // longe do ponto, mas endereço bate
+    g('g2', 'Auto Posto da Vovó', 'R. Lauro Linhares, 1620 - Trindade', 0.45), // nome bate
+    g('g3', 'Posto Ipiranga', 'Rod. Qualquer, 5', 0.02), // bandeira diferente de A, colado em A: não casa com A
+    g('g4', 'Posto Exemplo', 'Rua Longe', 0.4), // ponto do posto C é aproximado (bairro): casa pelo nome
+  ], [A, B, C]);
+  assert.equal(m.get('A')?.id, 'g1');
+  assert.equal(m.get('B')?.id, 'g2');
+  assert.equal(m.get('C')?.id, 'g4');
+});
