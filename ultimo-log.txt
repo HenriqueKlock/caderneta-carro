@@ -1,17 +1,62 @@
 Cadastro de revendedores…
-  linhas: 45779 | cabeçalho: ['CODIGOISIMP', 'AUTORIZACAO', 'DATAPUBLICACAO', 'RAZAOSOCIAL', 'CNPJ', 'ENDERECO', 'COMPLEMENTO', 'BAIRRO', 'CEP', 'UF', 'MUNICIPIO', 'BANDEIRA', 'DATAVINCULACAO']
-  amostra: [['1000965', 'PR/SC0011018', '14/09/2001', 'POSTO BERTAMONI LTDA', '00376885000128', 'RUA WILLY BARTH,  3845', '', 'CENTRO', '89900000', 'SC', 'SAO MIGUEL DO OESTE', 'RAIZEN', '24/09/2026'], ['1001871', 'PR/SC0013722', '14/09/2001', 'AUTO POSTO VALTELINO LTDA', '00965643000170', 'RODOVIA BR 101 KM 252,  S/N', '', 'SOROCABA', '88490000', 'SC', 'PAULO LOPES', 'IPIRANGA', '26/11/2009']]
   colunas do cadastro: {'cnpj': 'CNPJ', 'razao': 'RAZAOSOCIAL', 'fantasia': None, 'bandeira': 'BANDEIRA', 'end': 'ENDERECO', 'num': None, 'bairro': 'BAIRRO', 'cep': 'CEP', 'mun': 'MUNICIPIO', 'uf': 'UF', 'comp': 'COMPLEMENTO'}
   2095 postos em SC
 Levantamento de preços…
   semanas: ['2026-10-04→2026-10-10', '2026-09-27→2026-10-03', '2026-09-20→2026-09-26', '2026-09-13→2026-09-19', '2026-09-06→2026-09-12', '2026-08-30→2026-09-05']
-  colunas do LPC: {'cnpj': 'CNPJ', 'razao': 'RAZÃO', 'fantasia': 'FANTASIA', 'end': 'ENDEREÇO', 'num': 'NÚMERO', 'bairro': 'BAIRRO', 'cep': 'CEP', 'mun': 'MUNICÍPIO', 'uf': 'ESTADO', 'bandeira': 'BANDEIRA', 'prod': 'PRODUTO', 'preco': 'PREÇO DE REVENDA', 'data': 'DATA DA COLETA'}
   2026-10-04: 647 preços em 174 postos
+  2026-09-27: 657 preços em 173 postos
+  2026-09-20: 661 preços em 176 postos
+  2026-09-13: 663 preços em 175 postos
+  2026-09-06: 659 preços em 175 postos
+  2026-08-30: 646 preços em 172 postos
 Fiscalização…
   HEAD falhou: HTTP Error 403: Forbidden
-  baixado 15 MB em 21s
-  colunas da fiscalização: {'uf': 'UF', 'cnpj': 'CNPJ/CPF', 'data': 'DATA DO DF', 'doc': 'Número do Documento', 'proc': 'Procedimento de Fiscalização', 'res': 'Resultado', 'seg': 'Segmento Fiscalizado'}
-  fiscalização: 244247 linhas lidas, 4580 da(s) UF(s) desde 2021-10-21, 1494 CNPJs
-  segmentos: [('Revenda de Combustíveis', 3200), ('Revenda de GLP', 872), ('Agente Não Regulado', 127), ('TRR', 113), ('Distribuidor de Combustíveis Líquidos', 110), ('Ponto de Abastecimento', 53), ('Produtor de Óleo Acabado', 41), ('Distribuidor de GLP', 22), ('Coletor de OLUC', 12), ('Consumidor Industrial de Solventes', 8), ('Produtor de Biodiesel', 6), ('Revenda de Aviação', 5)]
-  amostra fiscalização: [["16581045000480", {"n": 4, "ult": "2026-10-02", "ev": [["2022-01-19", "I", "Não possuir documentos necessários para outorga de autorização ou protocolo de renovação"], ["2022-01-19", "I", "Não cumprir notificação"]]}], ["06980064010730", {"n": 4, "ult": "2026-10-02", "ev": [["2026-04-09", "N", "Notificação - Prazo 10 dias"]]}], ["20886973000187", {"n": 1, "ult": "2026-10-01", "ev": []}]]
-Probe concluído.
+  baixado 15 MB em 22s
+  fiscalização: 244247 linhas lidas, 3200 da(s) UF(s) desde 2021-10-21, 1103 CNPJs
+  gravado estado/fisc-SC.json (199 KB)
+Coordenadas…
+  2101 postos sem coordenada (limite desta rodada: 3000 consultas)
+  100 processados, 135 consultas
+  gravado estado/geocache.json (12 KB)
+  200 processados, 260 consultas
+  gravado estado/geocache.json (24 KB)
+  300 processados, 393 consultas
+  gravado estado/geocache.json (36 KB)
+  400 processados, 524 consultas
+  gravado estado/geocache.json (49 KB)
+  500 processados, 681 consultas
+  gravado estado/geocache.json (60 KB)
+  600 processados, 825 consultas
+  gravado estado/geocache.json (73 KB)
+  700 processados, 958 consultas
+  gravado estado/geocache.json (84 KB)
+  800 processados, 1122 consultas
+  gravado estado/geocache.json (96 KB)
+  900 processados, 1276 consultas
+  gravado estado/geocache.json (108 KB)
+  1000 processados, 1416 consultas
+  gravado estado/geocache.json (120 KB)
+  1100 processados, 1581 consultas
+  gravado estado/geocache.json (131 KB)
+  1200 processados, 1737 consultas
+  gravado estado/geocache.json (143 KB)
+  1300 processados, 1861 consultas
+  gravado estado/geocache.json (155 KB)
+  1400 processados, 1985 consultas
+  gravado estado/geocache.json (167 KB)
+  1500 processados, 2142 consultas
+  gravado estado/geocache.json (179 KB)
+  1600 processados, 2287 consultas
+  gravado estado/geocache.json (190 KB)
+  1700 processados, 2430 consultas
+  gravado estado/geocache.json (202 KB)
+  1800 processados, 2573 consultas
+  gravado estado/geocache.json (214 KB)
+  1900 processados, 2721 consultas
+  gravado estado/geocache.json (226 KB)
+  2000 processados, 2890 consultas
+  gravado estado/geocache.json (238 KB)
+  limite de consultas desta rodada atingido; o resto fica para a próxima
+  gravado estado/geocache.json (246 KB)
+  gravado estado/postos-SC.json (505 KB)
+Resumo: {"cadastro": 2101, "com_local": 1971, "sem_local": 130, "com_preco": 219}
