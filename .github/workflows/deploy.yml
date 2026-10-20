@@ -24,6 +24,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Dados dos postos (branch dados)
+        run: |
+          mkdir -p public/dados
+          if git ls-remote --exit-code --heads origin dados >/dev/null; then
+            git fetch --depth=1 origin dados
+            for f in $(git ls-tree --name-only FETCH_HEAD | grep -E '^postos-.*\.json$'); do git show "FETCH_HEAD:$f" > "public/dados/$f"; done
+          fi
+          ls -la public/dados
       - run: npm run check
       - run: npm test
       - run: npm run build

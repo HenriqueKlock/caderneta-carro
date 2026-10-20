@@ -6,3 +6,6 @@ caderneta-carro-backup-*.json
 data/
 .env
 .env.*
+
+# gerado no deploy a partir da branch dados
+public/dados/

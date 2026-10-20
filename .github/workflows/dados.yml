@@ -1,0 +1,61 @@
+name: Dados dos postos (ANP)
+
+# Gera public/dados/postos-SC.json a partir dos dados abertos da ANP.
+# O estado (coordenadas já encontradas e o resumo da fiscalização) fica na branch `dados`;
+# ao terminar, dispara um novo deploy do app para publicar o arquivo.
+on:
+  schedule:
+    # ter e sáb, 07:23 de Brasília: o levantamento semanal costuma sair na sexta e às vezes na segunda
+    - cron: '23 10 * * 2,6'
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: 'completo ou probe (só mostra as colunas das fontes)'
+        default: completo
+      max_geo:
+        description: 'consultas de endereço nesta rodada (1 por segundo)'
+        default: '3000'
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: dados-postos
+  cancel-in-progress: false
+
+jobs:
+  dados:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install openpyxl==3.1.5
+      - name: Testes do gerador
+        run: python -m unittest pipeline/test_postos.py
+      - name: Estado anterior (branch dados)
+        run: |
+          if git ls-remote --exit-code --heads origin dados >/dev/null; then
+            git fetch --depth=1 origin dados:dados
+            git worktree add estado dados
+          else
+            git worktree add --orphan -b dados estado
+          fi
+      - name: Gerar
+        run: python pipeline/postos.py --modo "${{ inputs.modo || 'completo' }}" --uf SC --estado estado --max-geo "${{ inputs.max_geo || '3000' }}"
+      - name: Guardar na branch dados
+        if: ${{ (inputs.modo || 'completo') == 'completo' }}
+        working-directory: estado
+        run: |
+          git add -A
+          if git diff --cached --quiet; then echo "nada mudou"; exit 0; fi
+          git -c user.name="caderneta-bot" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "Dados ANP $(date -u +%F)"
+          git push origin dados
+      - name: Publicar no app
+        if: ${{ (inputs.modo || 'completo') == 'completo' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy.yml --ref main
