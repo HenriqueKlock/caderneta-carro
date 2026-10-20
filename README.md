@@ -19,6 +19,14 @@ A chave pública do Supabase pode aparecer no código: ela só acessa o que as r
 
 Casa e trabalho (aba Postos) ficam na tabela `user_places`, com a mesma regra: só o dono lê. Guardamos rua, bairro e o ponto no mapa, sem o número; a localização do GPS é usada na hora e não é gravada.
 
+## Segurança
+
+- **RLS em todas as tabelas**: cada usuário só lê e altera as próprias linhas; ninguém apaga pela API (exclusão é marcação); visitante sem login não tem permissão nenhuma.
+- **Cota diária por usuário** nas funções que custam dinheiro (`consume_quota`, tabela `api_usage`): Google 40 buscas de postos, 20 buscas pontuais e 30 de endereço por dia; leitura de OS 15 por dia.
+- **Teste de isolamento** (`supabase/tests/rls_isolamento.sql`): simula dois usuários e um visitante dentro de uma transação desfeita no fim; o resultado vem na mensagem de erro proposital (procure por "FALHOU").
+- **Teste de caixa preta** (`tests/blackbox.mjs`): roda a cada deploy só com a URL e a chave pública; tenta ler, criar, alterar e apagar sem login e com token forjado, listar arquivos de OS, chamar as funções e procura chaves secretas no site publicado. Se algo abrir, o deploy para.
+- **Administração**: quem tem acesso ao painel do Supabase (o dono do projeto) vê os dados de todos os usuários; a RLS protege usuários entre si, não do administrador.
+
 ## Postos
 
 A aba Postos usa só dados públicos, gerados toda semana pelo workflow `dados.yml` (`pipeline/postos.py`):

@@ -14,6 +14,24 @@ function cors(origin: string | null) {
   };
 }
 
+/** Cota diária por usuário (tabela api_usage). Sem confirmação da cota, não chama o serviço pago. */
+async function withinQuota(req: Request, fn: string, max: number): Promise<boolean> {
+  const url = Deno.env.get('SUPABASE_URL');
+  const apikey = req.headers.get('apikey') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+  const auth = req.headers.get('authorization') ?? '';
+  if (!url || !auth) return false;
+  try {
+    const r = await fetch(url + '/rest/v1/rpc/consume_quota', {
+      method: 'POST',
+      headers: { apikey, Authorization: auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_fn: fn, p_max: max }),
+    });
+    return r.ok && (await r.json()) === true;
+  } catch {
+    return false;
+  }
+}
+
 Deno.serve(async (req) => {
   const headers = cors(req.headers.get('origin'));
   if (req.method === 'OPTIONS') return new Response('ok', { headers });
@@ -23,6 +41,8 @@ Deno.serve(async (req) => {
 
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
   if (!apiKey) return json(503, { error: 'A leitura de OS ainda não está configurada (falta a chave da API do Claude).' });
+
+  if (!(await withinQuota(req, 'parse_os', 15))) return json(429, { error: 'Limite diário de leituras de OS atingido para esta conta. Tente amanhã.' });
 
   try {
     const input = validateInput(await req.json());

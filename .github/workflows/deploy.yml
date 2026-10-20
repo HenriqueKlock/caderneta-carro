@@ -35,6 +35,8 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run build
+      - name: Segurança (caixa preta, só com o que é público)
+        run: node tests/blackbox.mjs dist
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

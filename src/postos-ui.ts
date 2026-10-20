@@ -7,7 +7,7 @@ import {
 import { gps, loadStations, reverse, route, searchPlaces, type FoundPlace, type Route } from './lugares';
 import { currentSession, getPlaces, googlePlaces, setPlace, type PlaceKind, type Places } from './sync';
 import { ICON } from './icons';
-import type { FuelLog } from './db';
+import { getMeta, setMeta, type FuelLog } from './db';
 
 export interface CarInfo { model: CarModel; name: string }
 interface Ctx {
@@ -145,23 +145,60 @@ export function initPostos(ctx: Ctx) {
   }
 
   /* ---------- notas do Google (quando configuradas) ---------- */
-  async function fetchGoogle(center: LatLon, radiusKm: number) {
-    if (googleOn === false || !file) return;
-    const key = center.lat.toFixed(3) + ',' + center.lon.toFixed(3) + ',' + radiusKm;
-    if (googleDone.has(key) || navigator.onLine === false || !(await currentSession())) return;
-    googleDone.add(key);
-    try {
-      const res = await googlePlaces<GoogleStation>({ mode: 'nearby', lat: center.lat, lon: center.lon, radius_m: Math.round((radiusKm * 1000) / 1.3) });
-      googleOn = res.configured;
-      if (!res.configured) return;
-      const bb = bboxAround(center, radiusKm + 3);
-      const near = file.postos.filter((s) => s.la > bb.s && s.la < bb.n && s.lo > bb.w && s.lo < bb.e && !gmatch.has(s.c));
-      addMatches(matchGoogle(res.places, near));
+  /* Cache do Google no aparelho: cada área (e cada posto procurado) é buscada no máximo uma vez por semana. */
+  const G_TTL = 7 * 86400000;
+  const G_KEY = 'google_cache';
+  type GCache = Record<string, { at: number; places: GoogleStation[] }>;
+  let gcache: GCache | null = null;
+  let gBlocked = '';
+  async function gGet(key: string): Promise<GoogleStation[] | null> {
+    gcache ??= await getMeta<GCache>(G_KEY, {});
+    const e = gcache[key];
+    return e && Date.now() - e.at < G_TTL ? e.places : null;
+  }
+  async function gPut(key: string, places: GoogleStation[]) {
+    gcache ??= await getMeta<GCache>(G_KEY, {});
+    gcache[key] = { at: Date.now(), places };
+    const keys = Object.keys(gcache).filter((k) => Date.now() - gcache![k].at < G_TTL).sort((a, b) => gcache![b].at - gcache![a].at);
+    gcache = Object.fromEntries(keys.slice(0, 80).map((k) => [k, gcache![k]]));
+    await setMeta(G_KEY, gcache);
+  }
+  /** Erro da função: 429 = limite do dia (do app ou da conta); para de tentar até reabrir o app. */
+  async function gError(e: unknown) {
+    const ctxRes = (e as { context?: Response })?.context;
+    if (ctxRes?.status === 429) {
+      try { gBlocked = (await ctxRes.json()).error; } catch { gBlocked = 'Limite diário do Google atingido.'; }
       render();
-      renderHome();
-    } catch (e) {
-      console.warn('google', e);
+    } else console.warn('google', e);
+  }
+
+  async function fetchGoogle(center: LatLon, radiusKm: number) {
+    if (googleOn === false || gBlocked || !file) return;
+    // área arredondada (~2 km) e raio em degraus: abrir de novo no mesmo lugar reaproveita a busca
+    const snap = { lat: Math.round(center.lat / 0.02) * 0.02, lon: Math.round(center.lon / 0.02) * 0.02 };
+    const r = radiusKm <= 4 ? 4 : radiusKm <= 7 ? 7 : 10;
+    const key = 'nearby:' + snap.lat.toFixed(2) + ',' + snap.lon.toFixed(2) + ',' + r;
+    if (googleDone.has(key)) return;
+    googleDone.add(key);
+    let places = await gGet(key);
+    if (places) googleOn = true;
+    else {
+      if (navigator.onLine === false || !(await currentSession())) return;
+      try {
+        const res = await googlePlaces<GoogleStation>({ mode: 'nearby', lat: snap.lat, lon: snap.lon, radius_m: Math.round((r * 1000) / 1.3) });
+        googleOn = res.configured;
+        if (!res.configured) return;
+        places = res.places;
+        await gPut(key, places);
+      } catch (e) {
+        return gError(e);
+      }
     }
+    const bb = bboxAround(snap, r + 3);
+    const near = file.postos.filter((s) => s.la > bb.s && s.la < bb.n && s.lo > bb.w && s.lo < bb.e && !gmatch.has(s.c));
+    addMatches(matchGoogle(places, near));
+    render();
+    renderHome();
   }
 
   /* ---------- aba Postos ---------- */
@@ -386,7 +423,7 @@ export function initPostos(ctx: Ctx) {
   function sourcesNote() {
     if (!file) return '';
     const w = file.fontes.lpc_semanas[0];
-    const g = googleOn === true ? 'Notas do Google incluídas.' : googleOn === false ? 'Notas do Google ainda não configuradas; a nota usa só a fiscalização.' : '';
+    const g = gBlocked ? esc(gBlocked) + ' As notas já buscadas continuam valendo.' : googleOn === true ? 'Notas do Google incluídas (atualizadas uma vez por semana).' : googleOn === false ? 'Notas do Google ainda não configuradas; a nota usa só a fiscalização.' : '';
     return '<p class="foot-note">Preços: pesquisa semanal da ANP' + (w ? ' (mais recente: ' + dm(w[0]) + ' a ' + dm(w[1]) + ')' : '') + ' e os seus abastecimentos. Confiabilidade: fiscalização da ANP nos últimos 5 anos' + (file.fontes.fisc_ate ? ' (até ' + dm(file.fontes.fisc_ate) + '/' + file.fontes.fisc_ate.slice(0, 4) + ')' : '') + '. ' + g + ' Distâncias aproximadas.</p>';
   }
 
@@ -461,7 +498,7 @@ export function initPostos(ctx: Ctx) {
       '<div class="rel-part"><div class="h"><span>Fiscalização da ANP (5 anos)</span><b>' + fmt(rel.anp, 1) + '</b></div><div class="bar"><i style="width:' + Math.round((rel.anp / 5) * 100) + '%"></i></div><span class="hint">' + esc(anpTxt) + '</span></div>' +
       (ev.length ? '<ul class="ev-list">' + ev.slice(0, 6).map(([d, t, txt]) => '<li><span class="d">' + dm(d) + '/' + d.slice(2, 4) + '</span><span><b>' + EVENT_LABEL[t] + '</b>' + (txt ? ' · ' + esc(txt.replace(/^(Notificação|MRC)\s*-\s*(PR ?Comb\s*-\s*)?/i, '')) : '') + '</span></li>').join('') + '</ul>' : '') +
       '<div class="rel-part"><div class="h"><span>Avaliações no Google</span><b>' + (g ? fmt(g.rating, 1) : '–') + '</b></div>' +
-      (g ? '<div class="bar"><i style="width:' + Math.round((g.rating / 5) * 100) + '%"></i></div><span class="hint">' + fmt(g.rating, 1) + ' em ' + g.count.toLocaleString('pt-BR') + ' avaliações</span>' : '<span class="hint">' + (googleOn ? (gTried.has(s.c) && !gm ? 'Não encontrei este posto no Google.' : 'Procurando no Google…') : googleOn === false ? 'Ainda não configurado: a nota usa só a fiscalização.' : 'Disponível com a conta conectada.') + '</span>') + '</div>' +
+      (g ? '<div class="bar"><i style="width:' + Math.round((g.rating / 5) * 100) + '%"></i></div><span class="hint">' + fmt(g.rating, 1) + ' em ' + g.count.toLocaleString('pt-BR') + ' avaliações</span>' : '<span class="hint">' + (gBlocked ? esc(gBlocked) : googleOn ? (gTried.has(s.c) && !gm ? 'Não encontrei este posto no Google.' : 'Procurando no Google…') : googleOn === false ? 'Ainda não configurado: a nota usa só a fiscalização.' : 'Disponível com a conta conectada.') + '</span>') + '</div>' +
       '<details class="more"><summary>Como a nota é calculada<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></summary><p class="hint">Começa em 5 e cada ocorrência da ANP nos últimos 5 anos desconta, mais quanto mais recente e mais grave: interdição e apreensão pesam mais; infração ligada ao combustível pesa mais que infração de papelada; notificação e medida corretiva pesam pouco. Infração de aferição da bomba, volume ou qualidade do combustível nos últimos 12 meses limita a nota em 2,5 e tira o posto da recomendação. Com o Google ligado, a média das avaliações entra com peso de 35%, puxada para 4,0 quando há poucas avaliações.</p></details></div>' +
       '<div class="card"><span class="b15">Seus abastecimentos aqui</span>' +
       (() => {
@@ -479,13 +516,21 @@ export function initPostos(ctx: Ctx) {
   /** Busca pontual de um posto que a busca por perto não trouxe (o Google devolve no máximo 20 por área). */
   async function lookupStation(s: Station) {
     gTried.add(s.c);
-    try {
-      const res = await googlePlaces<GoogleStation>({ mode: 'posto', query: 'posto de combustível ' + s.e + ', ' + s.m + ' SC', lat: s.la, lon: s.lo });
-      googleOn = res.configured;
-      if (res.configured) addMatches(matchGoogle(res.places, [s]));
-    } catch (e) {
-      console.warn('google', e);
+    const key = 'posto:' + s.c;
+    let places = await gGet(key);
+    if (!places && !gBlocked) {
+      try {
+        const res = await googlePlaces<GoogleStation>({ mode: 'posto', query: 'posto de combustível ' + s.e + ', ' + s.m + ' SC', lat: s.la, lon: s.lo });
+        googleOn = res.configured;
+        if (res.configured) {
+          places = res.places;
+          await gPut(key, places);
+        }
+      } catch (e) {
+        await gError(e);
+      }
     }
+    if (places) addMatches(matchGoogle(places, [s]));
     if (shown?.c === s.c && $('posto-sheet').classList.contains('open')) openPosto(s.c);
     render();
   }

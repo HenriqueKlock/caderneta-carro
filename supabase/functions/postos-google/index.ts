@@ -20,6 +20,26 @@ function cors(origin: string | null) {
   };
 }
 
+/** Cota diária por usuário (tabela api_usage). Sem confirmação da cota, não chama o serviço pago. */
+async function withinQuota(req: Request, fn: string, max: number): Promise<boolean> {
+  const url = Deno.env.get('SUPABASE_URL');
+  const apikey = req.headers.get('apikey') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+  const auth = req.headers.get('authorization') ?? '';
+  if (!url || !auth) return false;
+  try {
+    const r = await fetch(url + '/rest/v1/rpc/consume_quota', {
+      method: 'POST',
+      headers: { apikey, Authorization: auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_fn: fn, p_max: max }),
+    });
+    return r.ok && (await r.json()) === true;
+  } catch {
+    return false;
+  }
+}
+
+const LIMITS: Record<string, number> = { nearby: 40, posto: 20, address: 30 };
+
 const inBrazil = (lat: number, lon: number) => lat >= -34 && lat <= 6 && lon >= -74 && lon <= -34;
 
 function station(p: any) {
@@ -89,9 +109,14 @@ Deno.serve(async (req) => {
     return json(400, { error: 'Modo desconhecido.' });
   }
 
+  if (!(await withinQuota(req, 'google_' + mode, LIMITS[mode]))) {
+    console.log(JSON.stringify({ event: 'postos-google-cota', mode }));
+    return json(429, { error: 'Limite diário de buscas no Google atingido para esta conta. Tente amanhã.' });
+  }
   const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': fields }, body: JSON.stringify(body) });
   if (!r.ok) {
     console.error(JSON.stringify({ event: 'postos-google-error', mode, status: r.status, body: (await r.text()).slice(0, 300) }));
+    if (r.status === 429) return json(429, { error: 'A cota diária do Google do app acabou. Volta a funcionar amanhã.' });
     return json(502, { error: 'O Google não respondeu agora.' });
   }
   const data = await r.json();
