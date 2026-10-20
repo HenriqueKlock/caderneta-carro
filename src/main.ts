@@ -13,6 +13,7 @@ import { registerSW } from 'virtual:pwa-register';
 import { db, getMeta, setMeta, softDelete, stamp, uuid, type FuelLog, type FuelType, type Vehicle, type VehicleFuel } from './db';
 import { aggregate, intervals, kmPerDay, parseIntLoose, parseNum, sortLogs, type Interval } from './calc';
 import { exportBackup, importBackup } from './backup';
+import { currentSession, onSyncStatus, scheduleSync, sendCode, signOut, startAutoSync, sync, verifyCode, type SyncStatus } from './sync';
 
 declare const __BUILD__: string;
 
@@ -68,6 +69,8 @@ liveQuery(async () => {
   next: (s) => {
     S = s;
     render();
+    renderSync();
+    if (S.pending > 0 && syncStatus.kind !== 'signed-out') scheduleSync();
   },
   error: (e) => {
     console.error(e);
@@ -525,11 +528,99 @@ async function renderSettings() {
   $('ver-d').textContent = 'Build ' + __BUILD__;
   let persisted = false;
   try { persisted = (await navigator.storage?.persisted?.()) ?? false; } catch { /* sem suporte */ }
-  $('persist-d').textContent = persisted ? 'Sim: o Android não apaga estes dados para liberar espaço' : 'Não confirmado: faça backups até a sincronização chegar';
+  const signedIn = !!(await currentSession());
+  $('persist-d').textContent = persisted
+    ? 'Sim: o Android não apaga estes dados para liberar espaço'
+    : signedIn
+      ? 'Não confirmado, mas seus dados também ficam na nuvem'
+      : 'Não confirmado: entre na conta para ter cópia na nuvem, ou exporte backups';
 }
 $('set-btn').addEventListener('click', () => {
   renderSettings();
+  renderAccount();
   openSheet('set-sheet');
+});
+$('sync').addEventListener('click', () => $('set-btn').click());
+
+/* ---------- conta e sincronização ---------- */
+let syncStatus: SyncStatus = { kind: 'signed-out' };
+const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+function syncText(): [string, string] {
+  const n = S.pending;
+  switch (syncStatus.kind) {
+    case 'signed-out': return ['', 'Salvo só neste aparelho'];
+    case 'offline': return ['wait', n ? 'Sem internet · ' + n + ' a enviar' : 'Sem internet · dados no aparelho'];
+    case 'syncing': return ['wait', 'Sincronizando…'];
+    case 'ok': return n ? ['wait', n + ' a enviar'] : ['on', 'Sincronizado às ' + hhmm(syncStatus.at)];
+    case 'error': return ['err', 'Sincronização falhou · toque para ver'];
+  }
+}
+function renderSync() {
+  const [cls, txt] = syncText();
+  const el = $('sync');
+  el.className = 'sync ' + cls;
+  el.lastElementChild!.textContent = txt;
+  if (document.getElementById('acct-status')) renderAccount();
+}
+onSyncStatus((st) => {
+  syncStatus = st;
+  renderSync();
+});
+
+let otpEmail = '';
+let otpSent = false;
+async function renderAccount() {
+  const box = $('acct');
+  const session = await currentSession();
+  if (session) {
+    const detail = syncStatus.kind === 'error' ? syncStatus.message : syncText()[1];
+    box.innerHTML =
+      '<div class="set-row"><div><div class="t">' + esc(session.user.email) + '</div><div class="d" id="acct-status">' + esc(detail) + '</div></div><button type="button" class="link-btn" id="a-sync">Sincronizar</button></div>' +
+      '<div class="set-row"><div><div class="t">Sair desta conta</div><div class="d">Os dados continuam neste aparelho</div></div><button type="button" class="link-btn" id="a-out">Sair</button></div>';
+    return;
+  }
+  box.innerHTML =
+    '<div class="set-row col"><div><div class="t">Entrar para sincronizar</div><div class="d">Seus dados vão para a nuvem e aparecem em qualquer aparelho. Sem senha: você recebe um código no e-mail.</div></div>' +
+    '<div class="field"><label for="a-email">E-mail</label><input class="inp sm" id="a-email" type="email" inputmode="email" autocomplete="email" value="' + esc(otpEmail) + '"' + (otpSent ? ' readonly' : '') + '></div>' +
+    (otpSent ? '<div class="field"><label for="a-code">Código do e-mail</label><input class="inp" id="a-code" inputmode="numeric" autocomplete="one-time-code" maxlength="8"></div>' : '') +
+    '<div class="err" id="a-err" hidden></div>' +
+    '<div class="actions">' + (otpSent ? '<button type="button" class="btn ghost" id="a-back">Trocar e-mail</button>' : '') +
+    '<button type="button" class="btn primary" id="a-go">' + (otpSent ? 'Entrar' : 'Enviar código') + '</button></div></div>';
+  if (otpSent) setTimeout(() => document.getElementById('a-code')?.focus(), 50);
+}
+$('acct').addEventListener('click', async (e) => {
+  const id = (e.target as HTMLElement).closest('button')?.id;
+  if (!id) return;
+  const err = (m: string) => { const el = document.getElementById('a-err'); if (el) { el.textContent = m; el.hidden = false; } };
+  const btn = e.target as HTMLButtonElement;
+  if (id === 'a-sync') { await sync(); return renderAccount(); }
+  if (id === 'a-out') { await signOut(); toast('Você saiu. Os dados continuam neste aparelho.'); return renderAccount(); }
+  if (id === 'a-back') { otpSent = false; return renderAccount(); }
+  if (id === 'a-go') {
+    if (navigator.onLine === false) return err('Sem internet. Conecte-se para entrar.');
+    btn.disabled = true;
+    try {
+      if (!otpSent) {
+        otpEmail = $<HTMLInputElement>('a-email').value.trim().toLowerCase();
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(otpEmail)) throw new Error('Digite um e-mail válido.');
+        await sendCode(otpEmail);
+        otpSent = true;
+        toast('Código enviado para ' + otpEmail);
+      } else {
+        const code = $<HTMLInputElement>('a-code').value.replace(/\D/g, '');
+        if (code.length < 6 || code.length > 8) throw new Error('Digite o código numérico que chegou no e-mail.');
+        await verifyCode(otpEmail, code);
+        otpSent = false;
+        toast('Conta conectada. Sincronizando…');
+        await sync();
+      }
+      renderAccount();
+    } catch (ex) {
+      err((ex as Error).message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
 });
 $('exp-btn').addEventListener('click', async () => {
   const data = await exportBackup();
@@ -589,3 +680,4 @@ const updateSW = registerSW({
   },
 });
 navigator.storage?.persist?.().catch(() => {});
+startAutoSync();

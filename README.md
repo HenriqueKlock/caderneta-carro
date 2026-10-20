@@ -31,9 +31,9 @@ npm run build    # gera dist/ com o service worker
 
 | Fase | Entrega | Status |
 | --- | --- | --- |
-| 0 | Repositório, deploy no Pages, projeto Supabase | em validação |
-| 1 | App offline: abastecimentos, carros, backup | em validação |
-| 2 | Sincronização com Supabase e login | — |
+| 0 | Repositório, deploy no Pages, projeto Supabase | validada |
+| 1 | App offline: abastecimentos, carros, backup | validada |
+| 2 | Sincronização com Supabase e login por código no e-mail | em validação |
 | 3 | Manutenção com leitura de OS em PDF | — |
 | 4 | Pesquisa de plano do fabricante e APK | — |
 
