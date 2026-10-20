@@ -1,6 +1,6 @@
 import { createClient, type Session } from '@supabase/supabase-js';
 import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from './config';
-import { db, getMeta, setMeta } from './db';
+import { db, getMeta, now, setMeta } from './db';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   // Login pelo link do e-mail: o Supabase devolve a sessão no fragmento (#access_token=…) da URL do app
@@ -128,6 +128,7 @@ export async function sync(): Promise<void> {
   running = true;
   emit({ kind: 'syncing' });
   try {
+    await uploadAttachments(session.user.id);
     for (const t of TABLES) await push(t);
     for (const t of TABLES) await pull(t);
     if (!owner) await setMeta('owner_user_id', session.user.id);
@@ -192,4 +193,80 @@ export function startAutoSync() {
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && scheduleSync(500));
   setInterval(() => document.visibilityState === 'visible' && sync(), 5 * 60 * 1000);
   scheduleSync(300);
+}
+
+/* ---------- anexos de OS (Storage) ---------- */
+const EXT: Record<string, string> = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic' };
+
+/** Sobe os arquivos já ligados a uma manutenção salva e grava o caminho no registro. */
+async function uploadAttachments(uid: string) {
+  const files = await db.pending_files.where('status').equals('anexo').toArray();
+  for (const f of files) {
+    if (!f.service_id) continue;
+    const svc = await db.services.get(f.service_id);
+    if (!svc || svc.deleted_at) {
+      await db.pending_files.delete(f.id);
+      continue;
+    }
+    const path = uid + '/' + f.service_id + '.' + (EXT[f.type] ?? 'bin');
+    const { error } = await supabase.storage.from('os').upload(path, f.blob, { upsert: true, contentType: f.type });
+    if (error) throw error;
+    await db.transaction('rw', db.services, db.pending_files, async () => {
+      await db.services.update(f.service_id!, { attachment_path: path, updated_at: now(), _dirty: 1 });
+      await db.pending_files.delete(f.id);
+    });
+  }
+}
+
+/** Link temporário para abrir o anexo guardado na nuvem. */
+export async function attachmentUrl(path: string): Promise<string> {
+  const { data, error } = await supabase.storage.from('os').createSignedUrl(path, 300);
+  if (error || !data) throw new Error('Não consegui abrir o anexo agora.');
+  return data.signedUrl;
+}
+
+/* ---------- leitura de OS ---------- */
+export interface OsDraftItem { description: string; quantity: string | null; plan_item_key: string | null; parts_brl: number; labor_brl: number }
+export interface OsDraft {
+  date: string | null;
+  odometer_km: number | null;
+  shop: string | null;
+  os_number: string | null;
+  type: 'revisao' | 'corretiva' | 'pneus' | 'outros';
+  items: OsDraftItem[];
+  totals: { parts_brl: number; labor_brl: number; total_brl: number };
+  document_totals: { parts_brl: number | null; labor_brl: number | null; total_brl: number | null };
+  warnings: string[];
+}
+
+function toBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1] ?? '');
+    r.onerror = () => reject(new Error('Não consegui ler o arquivo.'));
+    r.readAsDataURL(blob);
+  });
+}
+
+export async function parseOS(
+  file: Blob,
+  plan_items: { key: string; description: string }[],
+  vehicle: { name?: string | null; make?: string | null; model?: string | null; year?: number | null },
+): Promise<OsDraft> {
+  if (file.size > 10 * 1024 * 1024) throw new Error('Arquivo grande demais (máximo 10 MB).');
+  const { data, error } = await supabase.functions.invoke('parse-os', {
+    body: { file_base64: await toBase64(file), media_type: file.type, plan_items, vehicle },
+  });
+  if (error) {
+    let msg = 'Não consegui ler a OS agora.';
+    try {
+      const body = await (error as any).context?.json?.();
+      if (body?.error) msg = body.error;
+    } catch {
+      /* resposta sem corpo */
+    }
+    if (/Failed to fetch|NetworkError/i.test(String((error as any).message))) msg = 'Sem conexão com o servidor.';
+    throw new Error(msg);
+  }
+  return (data as { draft: OsDraft }).draft;
 }

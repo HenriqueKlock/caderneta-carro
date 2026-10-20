@@ -10,7 +10,9 @@ import './styles.css';
 
 import { liveQuery } from 'dexie';
 import { registerSW } from 'virtual:pwa-register';
-import { db, getMeta, setMeta, softDelete, stamp, uuid, type FuelLog, type FuelType, type Vehicle, type VehicleFuel } from './db';
+import { db, getMeta, setMeta, softDelete, stamp, uuid, type FuelLog, type FuelType, type PendingFile, type Service, type ServiceItem, type Vehicle, type VehicleFuel } from './db';
+import { initMaintenance, currentKmOf } from './manut';
+import { maintenanceTotals } from './maintenance';
 import { aggregate, intervals, kmPerDay, parseIntLoose, parseNum, sortLogs, type Interval } from './calc';
 import { exportBackup, importBackup } from './backup';
 import { currentSession, onSyncStatus, scheduleSync, sendLoginEmail, signOut, startAutoSync, supabase, sync, verifyCode, type SyncStatus } from './sync';
@@ -40,8 +42,11 @@ interface State {
   currentId: string | null;
   calc: CalcCfg;
   pending: number;
+  services: Service[];
+  items: ServiceItem[];
+  files: PendingFile[];
 }
-let S: State = { vehicles: [], logs: [], currentId: null, calc: { gas: '', eth: '', ratio: 0.7 }, pending: 0 };
+let S: State = { vehicles: [], logs: [], currentId: null, calc: { gas: '', eth: '', ratio: 0.7 }, pending: 0, services: [], items: [], files: [] };
 
 const activeVehicles = () => S.vehicles.filter((v) => !v.archived).sort((a, b) => a.name.localeCompare(b.name));
 const current = (): Vehicle | undefined => S.vehicles.find((v) => v.id === S.currentId && !v.archived) ?? activeVehicles()[0];
@@ -50,13 +55,18 @@ const carLogs = (): FuelLog[] => {
   return v ? sortLogs(S.logs.filter((f) => f.vehicle_id === v.id)) : [];
 };
 
+const maint = initMaintenance({ $, fmt, brl, km, esc, pl, todayISO, toast, openSheet, closeSheets, parseNum, parseIntLoose });
+
 liveQuery(async () => {
-  const [vehicles, logs, currentId, calc, dirty] = await Promise.all([
+  const [vehicles, logs, currentId, calc, dirty, services, items, files] = await Promise.all([
     db.vehicles.toArray(),
     db.fuel_logs.toArray(),
     getMeta<string | null>('current_vehicle', null),
     getMeta<CalcCfg>('calc', { gas: '', eth: '', ratio: 0.7 }),
     Promise.all([db.vehicles, db.fuel_logs, db.services, db.service_items].map((t: any) => t.where('_dirty').equals(1).count())),
+    db.services.toArray(),
+    db.service_items.toArray(),
+    db.pending_files.toArray(),
   ]);
   return {
     vehicles: vehicles.filter((v) => !v.deleted_at),
@@ -64,6 +74,9 @@ liveQuery(async () => {
     currentId,
     calc,
     pending: dirty.reduce((a: number, b: number) => a + b, 0),
+    services: services.filter((x) => !x.deleted_at),
+    items: items.filter((x) => !x.deleted_at),
+    files,
   } as State;
 }).subscribe({
   next: (s) => {
@@ -86,12 +99,13 @@ function render() {
   const all = aggregate(iv);
   $('car-name').textContent = v ? v.name : 'Cadastrar carro';
   const last = fs[fs.length - 1];
-  const odoVal = last ? last.odometer_km : v?.initial_km ?? 0;
+  const odoVal = currentKmOf(v, fs, S.services);
   $('odo').innerHTML = [...String(odoVal).padStart(6, '0')].map((c) => '<span>' + c + '</span>').join('');
   $('last-fill').innerHTML = last ? 'Último: <b>' + dm(last.date) + '</b><br>' + fmt(last.liters, 2) + ' l · ' + brl(last.total_brl) : v ? 'Sem abastecimentos' : '';
   renderPainel(v, fs, iv, all);
   renderHist(fs, iv);
   renderCalc(v, fs, iv);
+  maint.render({ vehicle: v, logs: fs, services: S.services, items: S.items, pending: S.files });
 }
 
 function renderPainel(v: Vehicle | undefined, fs: FuelLog[], iv: Interval[], all: ReturnType<typeof aggregate>) {
@@ -139,6 +153,14 @@ function renderPainel(v: Vehicle | undefined, fs: FuelLog[], iv: Interval[], all
     ['Melhor tanque', fmt(best.kml, 2) + ' km/l', dm(best.date) + ' · ' + km(best.km) + ' km'],
     ['Pior tanque', fmt(worst.kml, 2) + ' km/l', dm(worst.date) + ' · ' + km(worst.km) + ' km'],
   ];
+  const y1 = new Date(todayISO() + 'T12:00:00Z');
+  y1.setUTCFullYear(y1.getUTCFullYear() - 1);
+  const m12 = maintenanceTotals(v.id, S.services, S.items, y1.toISOString().slice(0, 10));
+  const mSpan = maintenanceTotals(v.id, S.services, S.items, fs[0].date);
+  kpis.push(
+    ['Manutenção 12 meses', brl(m12.total), pl(m12.visits, 'ida à oficina', 'idas à oficina')],
+    ['Custo total por km', brl((all.cost + mSpan.total) / all.km), 'combustível + manutenção desde ' + dm(fs[0].date)],
+  );
   $('kpis').innerHTML = kpis.map((k) => '<div class="kpi"><span class="k">' + k[0] + '</span><span class="v num">' + k[1] + '</span><span class="s">' + k[2] + '</span></div>').join('');
   $('chart-kml').innerHTML = barChart(iv, all.kml);
   $('avg-legend').textContent = 'média ' + fmt(all.kml, 2);
@@ -275,13 +297,12 @@ function show(view: string) {
 document.querySelectorAll<HTMLElement>('.tab').forEach((t) => t.addEventListener('click', () => show(t.dataset.view!)));
 
 /* ---------- folhas ---------- */
-const sheets = ['fill-sheet', 'car-sheet', 'vehicle-sheet', 'set-sheet'];
 function openSheet(id: string) {
-  sheets.forEach((s) => $(s).classList.toggle('open', s === id));
+  document.querySelectorAll('.sheet').forEach((s) => s.classList.toggle('open', s.id === id));
   $('scrim').classList.add('open');
 }
 function closeSheets() {
-  sheets.forEach((s) => $(s).classList.remove('open'));
+  document.querySelectorAll('.sheet').forEach((s) => s.classList.remove('open'));
   $('scrim').classList.remove('open');
 }
 $('scrim').addEventListener('click', closeSheets);

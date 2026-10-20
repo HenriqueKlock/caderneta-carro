@@ -45,6 +45,23 @@ export interface Service extends SyncFields {
   os_number: string | null;
   type: 'revisao' | 'corretiva' | 'pneus' | 'outros';
   note: string | null;
+  /** Caminho do PDF/foto da OS no Storage (`<user_id>/<service_id>.<ext>`). */
+  attachment_path?: string | null;
+}
+
+/**
+ * Arquivo de OS guardado no aparelho: aguardando leitura (sem internet ou sem login)
+ * ou aguardando envio para o Storage depois de salvo como anexo de uma manutenção.
+ */
+export interface PendingFile {
+  id: string;
+  vehicle_id: string;
+  service_id: string | null;
+  status: 'aguardando_leitura' | 'anexo';
+  name: string;
+  type: string;
+  blob: Blob;
+  created_at: string;
 }
 
 export interface ServiceItem extends SyncFields {
@@ -55,6 +72,8 @@ export interface ServiceItem extends SyncFields {
   labor_brl: number;
   next_due_km: number | null;
   next_due_date: string | null;
+  /** Ordem do item na OS. */
+  position?: number;
 }
 
 export interface Meta {
@@ -68,6 +87,7 @@ export class AppDB extends Dexie {
   services!: Table<Service, string>;
   service_items!: Table<ServiceItem, string>;
   meta!: Table<Meta, string>;
+  pending_files!: Table<PendingFile, string>;
 
   constructor() {
     super('caderneta-carro');
@@ -77,6 +97,9 @@ export class AppDB extends Dexie {
       services: 'id, vehicle_id, _dirty, updated_at',
       service_items: 'id, service_id, _dirty, updated_at',
       meta: 'key',
+    });
+    this.version(2).stores({
+      pending_files: 'id, status, service_id',
     });
   }
 }
