@@ -45,9 +45,11 @@ jobs:
             git worktree add --orphan -b dados estado
           fi
       - name: Gerar
-        run: python pipeline/postos.py --modo "${{ inputs.modo || 'completo' }}" --uf SC --estado estado --max-geo "${{ inputs.max_geo || '3000' }}"
-      - name: Guardar na branch dados
-        if: ${{ (inputs.modo || 'completo') == 'completo' }}
+        run: |
+          set -o pipefail
+          python -u pipeline/postos.py --modo "${{ inputs.modo || 'completo' }}" --uf SC --estado estado --max-geo "${{ inputs.max_geo || '3000' }}" 2>&1 | tee estado/ultimo-log.txt
+      - name: Guardar na branch dados (o log vai junto, para conferência)
+        if: ${{ always() }}
         working-directory: estado
         run: |
           git add -A
