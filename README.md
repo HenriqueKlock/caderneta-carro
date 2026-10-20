@@ -55,6 +55,14 @@ npm run build    # gera dist/ com o service worker
 | — | Postos: preços, confiabilidade, casa e trabalho | em validação |
 | 4 | Pesquisa de plano do fabricante e APK | — |
 
+## Backlog
+
+1. Registrar o dia em que calibrou os pneus.
+2. Leitura de OS pela API do Claude (falta o segredo `ANTHROPIC_API_KEY`).
+3. Foto do manual para confirmar o plano de manutenção do Creta.
+4. Notas do Google nos postos (falta o segredo `GOOGLE_MAPS_API_KEY`).
+5. Fase 4: pesquisa do plano do fabricante e APK.
+
 ## Licença
 
 MIT
