@@ -1,6 +1,7 @@
 import { createClient, type Session } from '@supabase/supabase-js';
 import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from './config';
 import { db, getMeta, now, setMeta } from './db';
+import { loginEmailError } from './auth-errors';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   // Login pelo link do e-mail: o Supabase devolve a sessão no fragmento (#access_token=…) da URL do app
@@ -163,7 +164,7 @@ export const APP_URL = location.origin + import.meta.env.BASE_URL;
 /** Envia o e-mail de acesso. Com o modelo padrão do Supabase ele traz um link; com SMTP próprio pode trazer código. */
 export async function sendLoginEmail(email: string) {
   const { error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: APP_URL } });
-  if (error) throw new Error(/rate|seconds/i.test(error.message) ? 'Aguarde um minuto antes de pedir outro código.' : error.message);
+  if (error) throw new Error(loginEmailError(error.message));
 }
 
 export async function verifyCode(email: string, token: string) {
@@ -270,3 +271,4 @@ export async function parseOS(
   }
   return (data as { draft: OsDraft }).draft;
 }
+
