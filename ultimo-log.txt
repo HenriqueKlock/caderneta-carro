@@ -11,52 +11,21 @@ Levantamento de preços…
   2026-08-30: 646 preços em 172 postos
 Fiscalização…
   HEAD falhou: HTTP Error 403: Forbidden
-  baixado 15 MB em 22s
+  baixado 15 MB em 18s
   fiscalização: 244247 linhas lidas, 3200 da(s) UF(s) desde 2021-10-21, 1103 CNPJs
   gravado estado/fisc-SC.json (199 KB)
 Coordenadas…
-  2101 postos sem coordenada (limite desta rodada: 3000 consultas)
-  100 processados, 135 consultas
-  gravado estado/geocache.json (12 KB)
-  200 processados, 260 consultas
-  gravado estado/geocache.json (24 KB)
-  300 processados, 393 consultas
-  gravado estado/geocache.json (36 KB)
-  400 processados, 524 consultas
-  gravado estado/geocache.json (49 KB)
-  500 processados, 681 consultas
-  gravado estado/geocache.json (60 KB)
-  600 processados, 825 consultas
-  gravado estado/geocache.json (73 KB)
-  700 processados, 958 consultas
-  gravado estado/geocache.json (84 KB)
-  800 processados, 1122 consultas
-  gravado estado/geocache.json (96 KB)
-  900 processados, 1276 consultas
-  gravado estado/geocache.json (108 KB)
-  1000 processados, 1416 consultas
-  gravado estado/geocache.json (120 KB)
-  1100 processados, 1581 consultas
-  gravado estado/geocache.json (131 KB)
-  1200 processados, 1737 consultas
-  gravado estado/geocache.json (143 KB)
-  1300 processados, 1861 consultas
-  gravado estado/geocache.json (155 KB)
-  1400 processados, 1985 consultas
-  gravado estado/geocache.json (167 KB)
-  1500 processados, 2142 consultas
-  gravado estado/geocache.json (179 KB)
-  1600 processados, 2287 consultas
-  gravado estado/geocache.json (190 KB)
-  1700 processados, 2430 consultas
-  gravado estado/geocache.json (202 KB)
-  1800 processados, 2573 consultas
-  gravado estado/geocache.json (214 KB)
-  1900 processados, 2721 consultas
-  gravado estado/geocache.json (226 KB)
-  2000 processados, 2890 consultas
-  gravado estado/geocache.json (238 KB)
-  limite de consultas desta rodada atingido; o resto fica para a próxima
-  gravado estado/geocache.json (246 KB)
-  gravado estado/postos-SC.json (505 KB)
-Resumo: {"cadastro": 2101, "com_local": 1971, "sem_local": 130, "com_preco": 219}
+  557 postos sem coordenada (limite desta rodada: 3000 consultas)
+  100 processados, 263 consultas
+  gravado estado/geocache.json (247 KB)
+  200 processados, 528 consultas
+  gravado estado/geocache.json (248 KB)
+  300 processados, 787 consultas
+  gravado estado/geocache.json (249 KB)
+  400 processados, 1041 consultas
+  gravado estado/geocache.json (250 KB)
+  500 processados, 1294 consultas
+  gravado estado/geocache.json (251 KB)
+  gravado estado/geocache.json (255 KB)
+  gravado estado/postos-SC.json (482 KB)
+Resumo: {"cadastro": 2101, "com_local": 1863, "sem_local": 238, "com_preco": 217}
