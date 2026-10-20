@@ -3,7 +3,8 @@ import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from './config';
 import { db, getMeta, setMeta } from './db';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storageKey: 'caderneta-auth' },
+  // Login pelo link do e-mail: o Supabase devolve a sessão no fragmento (#access_token=…) da URL do app
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'implicit', storageKey: 'caderneta-auth' },
 });
 
 /** Ordem pai → filho: o banco recusa um filho cujo pai ainda não subiu. */
@@ -154,9 +155,13 @@ export async function currentSession(): Promise<Session | null> {
   }
 }
 
-/* ---------- login por código no e-mail ---------- */
-export async function sendCode(email: string) {
-  const { error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
+/* ---------- login sem senha pelo e-mail ---------- */
+/** URL para onde o link do e-mail volta: a raiz do app publicado (ou o servidor local em desenvolvimento). */
+export const APP_URL = location.origin + import.meta.env.BASE_URL;
+
+/** Envia o e-mail de acesso. Com o modelo padrão do Supabase ele traz um link; com SMTP próprio pode trazer código. */
+export async function sendLoginEmail(email: string) {
+  const { error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: APP_URL } });
   if (error) throw new Error(/rate|seconds/i.test(error.message) ? 'Aguarde um minuto antes de pedir outro código.' : error.message);
 }
 

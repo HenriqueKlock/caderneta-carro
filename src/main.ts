@@ -13,7 +13,7 @@ import { registerSW } from 'virtual:pwa-register';
 import { db, getMeta, setMeta, softDelete, stamp, uuid, type FuelLog, type FuelType, type Vehicle, type VehicleFuel } from './db';
 import { aggregate, intervals, kmPerDay, parseIntLoose, parseNum, sortLogs, type Interval } from './calc';
 import { exportBackup, importBackup } from './backup';
-import { currentSession, onSyncStatus, scheduleSync, sendCode, signOut, startAutoSync, sync, verifyCode, type SyncStatus } from './sync';
+import { currentSession, onSyncStatus, scheduleSync, sendLoginEmail, signOut, startAutoSync, supabase, sync, verifyCode, type SyncStatus } from './sync';
 
 declare const __BUILD__: string;
 
@@ -579,14 +579,15 @@ async function renderAccount() {
       '<div class="set-row"><div><div class="t">Sair desta conta</div><div class="d">Os dados continuam neste aparelho</div></div><button type="button" class="link-btn" id="a-out">Sair</button></div>';
     return;
   }
-  box.innerHTML =
-    '<div class="set-row col"><div><div class="t">Entrar para sincronizar</div><div class="d">Seus dados vão para a nuvem e aparecem em qualquer aparelho. Sem senha: você recebe um código no e-mail.</div></div>' +
-    '<div class="field"><label for="a-email">E-mail</label><input class="inp sm" id="a-email" type="email" inputmode="email" autocomplete="email" value="' + esc(otpEmail) + '"' + (otpSent ? ' readonly' : '') + '></div>' +
-    (otpSent ? '<div class="field"><label for="a-code">Código do e-mail</label><input class="inp" id="a-code" inputmode="numeric" autocomplete="one-time-code" maxlength="8"></div>' : '') +
-    '<div class="err" id="a-err" hidden></div>' +
-    '<div class="actions">' + (otpSent ? '<button type="button" class="btn ghost" id="a-back">Trocar e-mail</button>' : '') +
-    '<button type="button" class="btn primary" id="a-go">' + (otpSent ? 'Entrar' : 'Enviar código') + '</button></div></div>';
-  if (otpSent) setTimeout(() => document.getElementById('a-code')?.focus(), 50);
+  box.innerHTML = otpSent
+    ? '<div class="set-row col"><div><div class="t">Confira seu e-mail</div><div class="d">Enviamos um link de acesso para <b>' + esc(otpEmail) + '</b>. Abra o e-mail <b>neste aparelho</b> e toque no link: o app abre já conectado. Pode levar um minuto e às vezes cai no spam.</div></div>' +
+      '<div class="field"><label for="a-code">Se o e-mail trouxe um código numérico, digite aqui</label><input class="inp" id="a-code" inputmode="numeric" autocomplete="one-time-code" maxlength="8"></div>' +
+      '<div class="err" id="a-err" hidden></div>' +
+      '<div class="actions"><button type="button" class="btn ghost" id="a-back">Trocar e-mail</button><button type="button" class="btn primary" id="a-go">Entrar com código</button></div></div>'
+    : '<div class="set-row col"><div><div class="t">Entrar para sincronizar</div><div class="d">Seus dados vão para a nuvem e aparecem em qualquer aparelho. Sem senha: você recebe um link de acesso no e-mail.</div></div>' +
+      '<div class="field"><label for="a-email">E-mail</label><input class="inp sm" id="a-email" type="email" inputmode="email" autocomplete="email" value="' + esc(otpEmail) + '"></div>' +
+      '<div class="err" id="a-err" hidden></div>' +
+      '<div class="actions"><button type="button" class="btn primary" id="a-go">Enviar link de acesso</button></div></div>';
 }
 $('acct').addEventListener('click', async (e) => {
   const id = (e.target as HTMLElement).closest('button')?.id;
@@ -603,9 +604,9 @@ $('acct').addEventListener('click', async (e) => {
       if (!otpSent) {
         otpEmail = $<HTMLInputElement>('a-email').value.trim().toLowerCase();
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(otpEmail)) throw new Error('Digite um e-mail válido.');
-        await sendCode(otpEmail);
+        await sendLoginEmail(otpEmail);
         otpSent = true;
-        toast('Código enviado para ' + otpEmail);
+        toast('Link enviado para ' + otpEmail);
       } else {
         const code = $<HTMLInputElement>('a-code').value.replace(/\D/g, '');
         if (code.length < 6 || code.length > 8) throw new Error('Digite o código numérico que chegou no e-mail.');
@@ -681,3 +682,21 @@ const updateSW = registerSW({
 });
 navigator.storage?.persist?.().catch(() => {});
 startAutoSync();
+
+/* ---------- volta do link do e-mail ---------- */
+{
+  const hash = new URLSearchParams(location.hash.slice(1));
+  if (hash.get('error_code') || hash.get('error')) {
+    const expired = /expired|invalid/i.test(hash.get('error_code') + ' ' + hash.get('error_description'));
+    history.replaceState(null, '', location.pathname);
+    setTimeout(() => toast(expired ? 'O link expirou ou já foi usado. Peça outro na engrenagem.' : 'Não foi possível entrar pelo link. Tente de novo.'), 600);
+  } else if (hash.get('access_token')) {
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') {
+        otpSent = false;
+        toast('Conta conectada. Sincronizando…');
+        data.subscription.unsubscribe();
+      }
+    });
+  }
+}
