@@ -58,10 +58,10 @@ class Fluxo(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             cad = os.path.join(d, 'cad.csv')
             with open(cad, 'w', encoding='cp1252') as f:
-                f.write('CNPJ;RAZÃO SOCIAL;NOME FANTASIA;BANDEIRA;ENDEREÇO;NÚMERO;COMPLEMENTO;BAIRRO;CEP;MUNICÍPIO;UF\n')
-                f.write('11.111.111/0001-11;AUTO POSTO EXEMPLO UM LTDA;POSTO EXEMPLO UM;BRANCA;AV EXEMPLO;100;;CENTRO;88000-000;FLORIANÓPOLIS;SC\n')
-                f.write('22.222.222/0001-22;COMERCIO DE COMBUSTIVEIS DOIS;;IPIRANGA;R TESTE;S/N;;TRINDADE;88000-001;FLORIANÓPOLIS;SC\n')
-                f.write('33.333.333/0001-33;POSTO DE OUTRO ESTADO;;SHELL;R LONGE;1;;CENTRO;01000-000;SÃO PAULO;SP\n')
+                f.write('CODIGOISIMP;AUTORIZACAO;DATAPUBLICACAO;RAZAOSOCIAL;CNPJ;ENDERECO;COMPLEMENTO;BAIRRO;CEP;UF;MUNICIPIO;BANDEIRA;DATAVINCULACAO\n')
+                f.write('1;X;01/01/2001;AUTO POSTO EXEMPLO UM LTDA;11111111000111;AV EXEMPLO,  100;;CENTRO;88000000;SC;FLORIANÓPOLIS;BRANCA;01/01/2020\n')
+                f.write('2;X;01/01/2001;COMERCIO DE COMBUSTIVEIS DOIS EIRELI;22222222000122;R TESTE,  S/N;;TRINDADE;88000001;SC;FLORIANÓPOLIS;RAIZEN;01/01/2020\n')
+                f.write('3;X;01/01/2001;POSTO DE OUTRO ESTADO;33333333000133;R LONGE,  1;;CENTRO;01000000;SP;SÃO PAULO;VIBRA;01/01/2020\n')
             lpc = os.path.join(d, 'lpc.xlsx')
             xlsx(lpc, [
                 ['Levantamento de preços — revendas'], [],
@@ -73,12 +73,13 @@ class Fluxo(unittest.TestCase):
             ])
             fisc = os.path.join(d, 'fisc.xlsx')
             xlsx(fisc, [
-                ['UF', 'Município', 'Bairro', 'Endereço', 'CNPJ/CPF', 'Agente Econômico', 'Segmento Fiscalizado', 'Data DF', 'Número do Documento', 'Procedimento de Fiscalização', 'Resultado'],
-                ['SC', 'FLORIANOPOLIS', 'TRINDADE', 'R TESTE', '22.222.222/0001-22', 'X', 'POSTO REVENDEDOR', dt.datetime(2026, 3, 2), 1, 'Auto de Infração', 'Bomba medidora com volume a menor'],
-                ['SC', 'FLORIANOPOLIS', 'TRINDADE', 'R TESTE', '22.222.222/0001-22', 'X', 'POSTO REVENDEDOR', dt.datetime(2026, 3, 2), 1, 'Boletim de Fiscalização', 'Fiscalização de rotina'],
-                ['SC', 'FLORIANOPOLIS', 'CENTRO', 'AV EXEMPLO', '11.111.111/0001-11', 'X', 'POSTO REVENDEDOR', dt.datetime(2025, 1, 10), 2, 'Boletim de Fiscalização', 'Nada consta'],
-                ['SC', 'FLORIANOPOLIS', 'CENTRO', 'AV EXEMPLO', '11.111.111/0001-11', 'X', 'POSTO REVENDEDOR', dt.datetime(2019, 1, 10), 3, 'Auto de Interdição', 'Antigo, fora da janela'],
-                ['SP', 'SAO PAULO', 'CENTRO', 'R LONGE', '33.333.333/0001-33', 'X', 'POSTO REVENDEDOR', dt.datetime(2026, 3, 2), 4, 'Auto de Interdição', 'Outro estado'],
+                ['UF', 'Município', 'Bairro', 'Endereço', 'CNPJ/CPF', 'Agente Econômico', 'Segmento Fiscalizado', 'DATA DO DF', 'Número do Documento', 'Procedimento de Fiscalização', 'Resultado'],
+                ['SC', 'FLORIANOPOLIS', 'TRINDADE', 'R TESTE', '22.222.222/0001-22', 'X', 'Revenda de Combustíveis', dt.datetime(2026, 3, 2), 1, 'Auto de Infração', 'Bomba medidora com volume a menor'],
+                ['SC', 'FLORIANOPOLIS', 'TRINDADE', 'R TESTE', '22.222.222/0001-22', 'X', 'Revenda de Combustíveis', dt.datetime(2026, 3, 2), 1, 'Boletim de Fiscalização', 'Fiscalização de rotina'],
+                ['SC', 'FLORIANOPOLIS', 'CENTRO', 'AV EXEMPLO', '11.111.111/0001-11', 'X', 'Revenda de Combustíveis', dt.datetime(2025, 1, 10), 2, 'Boletim de Fiscalização', 'Nada consta'],
+                ['SC', 'FLORIANOPOLIS', 'CENTRO', 'AV EXEMPLO', '11.111.111/0001-11', 'X', 'Revenda de Combustíveis', dt.datetime(2019, 1, 10), 3, 'Auto de Interdição', 'Antigo, fora da janela'],
+                ['SC', 'FLORIANOPOLIS', 'CENTRO', 'X', '11.111.111/0001-11', 'X', 'Revenda de GLP', dt.datetime(2026, 2, 1), 9, 'Auto de Interdição', 'GLP não conta'],
+                ['SP', 'SAO PAULO', 'CENTRO', 'R LONGE', '33.333.333/0001-33', 'X', 'Revenda de Combustíveis', dt.datetime(2026, 3, 2), 4, 'Auto de Interdição', 'Outro estado'],
             ])
             est = os.path.join(d, 'estado')
             os.makedirs(est)
@@ -92,7 +93,8 @@ class Fluxo(unittest.TestCase):
             with open(os.path.join(est, 'geocache.json'), 'w') as f:
                 json.dump(cache, f)
             subprocess.run([sys.executable, os.path.join(AQUI, 'postos.py'), '--estado', est, '--uf', 'SC', '--cad', cad, '--lpc', lpc, '--fisc', fisc, '--sem-geo', '--hoje', '2026-10-20'], check=True, capture_output=True)
-            doc = json.load(open(os.path.join(est, 'postos-SC.json'), encoding='utf-8'))
+            with open(os.path.join(est, 'postos-SC.json'), encoding='utf-8') as f:
+                doc = json.load(f)
             by = {p['c']: p for p in doc['postos']}
             self.assertEqual(set(by), {'11111111000111', '22222222000122'})  # o 44… não tem coordenada; SP fica fora
             um = by['11111111000111']
@@ -102,7 +104,10 @@ class Fluxo(unittest.TestCase):
             self.assertEqual(um['f']['ev'], [])  # boletim conta como visita, não como ocorrência; 2019 fora da janela
             dois = by['22222222000122']
             self.assertEqual(dois['n'], 'Comercio de Combustiveis Dois')
+            self.assertEqual(dois['b'], 'Shell')
             self.assertEqual(dois['e'], 'Rua Teste')
+            self.assertEqual(um['e'], 'Avenida Exemplo, 100')
+            self.assertEqual(um['b'], 'Bandeira branca')
             self.assertEqual(dois['f']['ev'], [['2026-03-02', 'I', 'Bomba medidora com volume a menor']])
             self.assertEqual(doc['contagem']['cadastro'], 3)
             self.assertEqual(doc['contagem']['sem_local'], 1)

@@ -207,9 +207,15 @@ def parse_cadastro(rows: list[list[str]], ufs: set[str]) -> dict[str, dict]:
         cnpj = cnpj_of(g(r, 'cnpj'))
         if not cnpj:
             continue
+        end, num = g(r, 'end'), g(r, 'num')
+        if c['num'] < 0:
+            # O cadastro traz o número junto: "RUA WILLY BARTH,  3845" / "RODOVIA BR 101 KM 252,  S/N"
+            m = re.match(r'^(.*?),\s*([^,]*)$', end)
+            if m:
+                end, num = m.group(1), m.group(2)
         out[cnpj] = {
             'cnpj': cnpj, 'razao': g(r, 'razao'), 'fantasia': g(r, 'fantasia'), 'bandeira': g(r, 'bandeira'),
-            'end': g(r, 'end'), 'num': g(r, 'num'), 'comp': g(r, 'comp'), 'bairro': g(r, 'bairro'),
+            'end': end.strip(), 'num': num.strip(), 'comp': g(r, 'comp'), 'bairro': g(r, 'bairro'),
             'cep': digits(g(r, 'cep')), 'mun': g(r, 'mun'), 'uf': g(r, 'uf').upper(),
         }
     return out
@@ -299,7 +305,7 @@ def parse_fisc(raw: bytes, ufs: set[str], since: str, probe: bool = False) -> di
         if i > 30:
             raise RuntimeError('cabeçalho da fiscalização não encontrado')
     c = {
-        'uf': pick(h, 'UF'), 'cnpj': pick(h, 'CNPJCPF', 'CNPJ'), 'data': pick(h, 'DATADF', 'DATA'),
+        'uf': pick(h, 'UF'), 'cnpj': pick(h, 'CNPJCPF', 'CNPJ'), 'data': pick(h, 'DATADODF', 'DATADF', 'DATA'),
         'doc': pick(h, 'NUMERODODOCUMENTO', 'NUMERODOCUMENTO', 'NUMERO'), 'proc': pick(h, 'PROCEDIMENTODEFISCALIZACAO', 'PROCEDIMENTO', 'COMPONENTE'),
         'res': pick(h, 'RESULTADO'), 'seg': pick(h, 'SEGMENTOFISCALIZADO', 'SEGMENTO'),
     }
@@ -316,6 +322,9 @@ def parse_fisc(raw: bytes, ufs: set[str], since: str, probe: bool = False) -> di
         day = to_date(g(r, 'data'))
         if not day or day < since:
             continue
+        seg = norm(g(r, 'seg'))
+        if c['seg'] >= 0 and seg and not seg.startswith('REVENDADECOMBUSTIVE'):
+            continue  # GLP, TRR, distribuidoras etc. não são postos
         cnpj = cnpj_of(g(r, 'cnpj'))
         if not cnpj:
             continue
@@ -354,6 +363,26 @@ def clean_street(s: str) -> str:
     s = re.sub(r'\bSC[\s-]?(\d{3})\b', r'SC-\1', s)
     s = re.sub(r'\bBR[\s-]?(\d{3})\b', r'BR-\1', s)
     return s.strip()
+
+
+SUFIXOS = r'\s+(LTDA\.?|EIRELI|ME|EPP|S\.?/?A\.?|EM RECUPERACAO JUDICIAL)$'
+BANDEIRAS = {'RAIZEN': 'Shell', 'VIBRA': 'Petrobras', 'PETROBRASDISTRIBUIDORASA': 'Petrobras', 'BRANCA': 'Bandeira branca', 'IPIRANGA': 'Ipiranga', 'ALESAT': 'Ale'}
+
+
+def display_name(p: dict) -> str:
+    n = p.get('fantasia') or p.get('razao') or ''
+    n = re.sub(r'\s+', ' ', unicodedata.normalize('NFC', n.upper())).strip()
+    for _ in range(3):
+        n = re.sub(SUFIXOS, '', n).strip(' .-')
+    return title(n)[:60]
+
+
+def display_flag(s: str) -> str:
+    k = norm(s)
+    for key, val in BANDEIRAS.items():
+        if k.startswith(key):
+            return val
+    return title(s)[:30]
 
 
 def addr_key(p: dict) -> str:
@@ -504,6 +533,8 @@ def main():
                 prices[r['cnpj']][r['code']] = [r['price'], r['date']]
             if r['cnpj'] not in cad:
                 cad[r['cnpj']] = r['info']
+            elif not cad[r['cnpj']].get('fantasia') and r['info']['fantasia']:
+                cad[r['cnpj']]['fantasia'] = r['info']['fantasia']
         if probe:
             break
 
@@ -567,7 +598,7 @@ def main():
         num = digits(p['num'])
         endereco = title(clean_street(p['end'])) + (', ' + num if num else '')
         item = {
-            'c': cnpj, 'n': title(p['fantasia'] or p['razao'])[:60], 'b': title(p['bandeira'])[:30], 'e': endereco[:90],
+            'c': cnpj, 'n': display_name(p), 'b': display_flag(p['bandeira']), 'e': endereco[:90],
             'br': title(p['bairro'])[:40], 'm': title(p['mun']), 'la': g['la'], 'lo': g['lo'], 'pg': g['p'],
         }
         if cnpj in prices:
