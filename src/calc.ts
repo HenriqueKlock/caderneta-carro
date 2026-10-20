@@ -2,6 +2,8 @@ import type { FuelLog, FuelType } from './db';
 
 export interface Interval {
   id: string;
+  /** Abastecimento que encheu o tanque no início deste trecho (de onde veio o combustível). */
+  start_id: string;
   date: string;
   km: number;
   liters: number;
@@ -48,6 +50,7 @@ export function intervals(sorted: FuelLog[]): Interval[] {
       if (d > 0 && L > 0) {
         out.push({
           id: f.id,
+          start_id: anchor.id,
           date: f.date,
           km: d,
           liters: L,

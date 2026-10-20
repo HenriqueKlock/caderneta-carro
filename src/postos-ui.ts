@@ -1,6 +1,7 @@
 // Telas de postos: aba Postos, ficha do posto, "Outro local", Casa e trabalho e o card "Onde abastecer" do Início.
 import {
-  EVENT_LABEL, ageDays, bboxAround, haversineKm, recommend, sortRows, stationsFor,
+  EVENT_LABEL, ageDays, bboxAround, bestWithoutPrice, haversineKm, recommend, sortRows, stationsFor, usageVerdict,
+  type StationUse,
   type Base, type CarModel, type Fuel, type LatLon, type Option, type OwnPrice, type Recommendation, type Station, type StationRow, type StationsFile,
 } from './postos';
 import { gps, loadStations, reverse, route, searchAddress, type FoundPlace, type Route } from './lugares';
@@ -24,6 +25,18 @@ interface Ctx {
   logsAt: (cnpj: string) => FuelLog[];
   places: () => Places;
   fillAt: (s: Station, fuel: Fuel, price: number | null) => void;
+  /** Postos que você usa (com CNPJ), do mais frequente para o menos, com o rendimento dos tanques. */
+  usage: () => StationUse[];
+}
+
+/** Abre o posto no Google Maps (nota, fotos e o botão de rotas ficam lá). */
+export function mapsUrl(s: Station) {
+  return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent([s.n, s.e, s.m, 'SC'].filter(Boolean).join(', '));
+}
+
+/** Texto do campo "Posto" no abastecimento: nome e endereço (dois postos podem ter o mesmo nome). */
+export function stationLabel(s: Station) {
+  return (s.n + ' · ' + s.e).slice(0, 80);
 }
 
 type BaseKind = 'agora' | 'casa' | 'trabalho' | 'rota' | 'busca';
@@ -237,11 +250,65 @@ export function initPostos(ctx: Ctx) {
 
   function stationRow(r: StationRow, b: Base, today: string) {
     const sub = [distTxt(r, b), r.s.e, r.s.b].filter(Boolean).map(esc).join(' · ');
+    const mineTag = favorite()?.s.c === r.s.c ? '<span class="tag mine">seu posto</span> ' : '';
     const p = r.best?.price ?? r.gas ?? r.eth;
-    const gasOn = ctx.car().model.fuels.includes('gasolina'), ethOn = ctx.car().model.fuels.includes('etanol');
+    const any = !!(r.gas || r.eth);
+    const gasOn = any && ctx.car().model.fuels.includes('gasolina'), ethOn = any && ctx.car().model.fuels.includes('etanol');
     return (
-      '<button type="button" class="st-row" data-posto="' + r.s.c + '"><span class="h"><span class="n"><span>' + esc(r.s.n) + '</span><span>' + sub + '</span></span>' + chipScore(r) + '</span>' +
+      '<button type="button" class="st-row" data-posto="' + r.s.c + '"><span class="h"><span class="n"><span>' + mineTag + esc(r.s.n) + '</span><span>' + sub + '</span></span>' + chipScore(r) + '</span>' +
       '<span class="p">' + (gasOn ? '<span><i class="dot gas"></i>' + priceTxt(r.gas) + '</span>' : '') + (ethOn ? '<span><i class="dot eth"></i>' + priceTxt(r.eth) + '</span>' : '') + src(p, today) + '</span></button>'
+    );
+  }
+
+  /** Seu posto mais usado que está na lista da ANP. */
+  function favorite(): { u: StationUse; s: Station } | null {
+    if (!file) return null;
+    for (const u of ctx.usage()) {
+      const s = file.postos.find((x) => x.c === u.station_id);
+      if (s) return { u, s };
+    }
+    return null;
+  }
+
+  /** O mesmo posto calculado a partir da base atual (sem limite de raio). */
+  function rowFor(s: Station, b: Base): StationRow {
+    return stationsFor([s], b.kind === 'ponto' ? { ...b, radiusKm: 9999 } : { ...b, detourKm: 9999 }, ctx.car().model, ctx.own(), ctx.todayISO(), google)[0];
+  }
+
+  function myCard(b: Base, rec: Recommendation) {
+    const fav = favorite();
+    if (!fav) return '';
+    const { u, s } = fav;
+    const row = rowFor(s, b);
+    const km = Math.round(ctx.car().model.kmTank);
+    let price = '';
+    const mine = row.best && !row.best.stale ? row.best : null;
+    if (!mine) price = 'Sem preço recente deste posto. Ao abastecer lá, o preço que você pagar passa a valer.';
+    else if (!rec.best) price = FUEL[mine.fuel] + ' a ' + brl(mine.price.price) + ' (' + (mine.price.src === 'voce' ? 'você pagou' : 'ANP') + ', ' + dm(mine.price.date) + ') · ' + distTxt(row, b) + ' daqui.';
+    else if (rec.best && rec.best.s.c === s.c) price = '<b>É a melhor opção agora</b> (' + FUEL[mine.fuel].toLowerCase() + ' a ' + brl(mine.price.price) + ').';
+    else if (rec.best) {
+      const diff = mine.cost - rec.best.cost;
+      price = diff > 0.5
+        ? FUEL[mine.fuel] + ' a ' + brl(mine.price.price) + ': para rodar ' + km + ' km sai <b>≈ ' + brl(diff) + ' mais caro</b> que a melhor opção (' + esc(rec.best.s.n) + ').'
+        : FUEL[mine.fuel] + ' a ' + brl(mine.price.price) + ': praticamente o mesmo custo da melhor opção.';
+    }
+    const v = usageVerdict(u);
+    return (
+      '<button type="button" class="card my-card" data-posto="' + s.c + '"><span class="l">Seu posto · ' + u.fills + (u.fills === 1 ? ' abastecimento' : ' abastecimentos') + ', o último em ' + dm(u.last) + '</span>' +
+      '<span class="t">' + esc(s.n) + '</span>' +
+      '<span class="s">' + price + '</span>' +
+      (v ? '<span class="s ' + v.tone + '">' + esc(v.text) + '</span>' : '') + '</button>'
+    );
+  }
+
+  function noPriceCard(rows: StationRow[], b: Base) {
+    const r = bestWithoutPrice(rows);
+    const head = '<span class="l">Nenhum posto ' + (b.kind === 'rota' ? 'no caminho' : 'neste raio') + ' tem preço recente</span>';
+    if (!r) return '<div class="card my-card">' + head + '<span class="s">Os postos daqui não têm preço na pesquisa da ANP e nenhum passou na confiabilidade.</span></div>';
+    return (
+      '<button type="button" class="card my-card" data-posto="' + r.s.c + '">' + head +
+      '<span class="t">Melhor avaliado e mais perto: ' + esc(r.s.n) + '</span>' +
+      '<span class="s">Confiabilidade ' + fmt(r.rel.score, 1) + ' · ' + distTxt(r, b) + ' · <b>sem preço</b>: confira na bomba. O preço que você pagar fica registrado para as próximas vezes.</span></button>'
     );
   }
 
@@ -276,12 +343,13 @@ export function initPostos(ctx: Ctx) {
     const limit = showAll ? sorted.length : 20;
     let html = '';
     if (rec.best) html += recCard(base, rec, rs.base);
-    else if (rows.length) html += '<div class="card"><p class="hint">Nenhum posto aqui tem preço recente da ANP. Os preços que você registrar ao abastecer passam a valer aqui.</p></div>';
+    else if (rows.length) html += noPriceCard(rows, rs.base);
+    html += myCard(rs.base, rec);
     html += compareCard(base);
     if (!rows.length) {
       html += '<div class="card center"><p class="hint">Nenhum posto ' + (rs.base.kind === 'rota' ? 'tão perto do caminho' : 'neste raio') + '. Aumente a distância acima.</p></div>';
     } else {
-      html += '<div class="sec-head"><span>' + rows.length + (rows.length === 1 ? ' posto' : ' postos') + '</span><span class="hint">mais em conta primeiro</span></div>';
+      html += '<div class="sec-head"><span>' + rows.length + (rows.length === 1 ? ' posto' : ' postos') + '</span><span class="hint">preço mais recente primeiro</span></div>';
       html += '<div class="list-card">' + sorted.slice(0, limit).map((r) => stationRow(r, rs.base, today)).join('') + (sorted.length > limit ? '<button type="button" class="list-more" data-act="all">Mostrar todos (' + sorted.length + ')</button>' : '') + '</div>';
     }
     body.innerHTML = html + sourcesNote();
@@ -366,12 +434,17 @@ export function initPostos(ctx: Ctx) {
       (g ? '<div class="bar"><i style="width:' + Math.round((g.rating / 5) * 100) + '%"></i></div><span class="hint">' + fmt(g.rating, 1) + ' em ' + g.count.toLocaleString('pt-BR') + ' avaliações</span>' : '<span class="hint">' + (googleOn ? 'Não encontrei este posto no Google.' : 'Ainda não configurado: a nota usa só a fiscalização.') + '</span>') + '</div>' +
       '<details class="more"><summary>Como a nota é calculada<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></summary><p class="hint">Começa em 5 e cada ocorrência da ANP nos últimos 5 anos desconta, mais quanto mais recente e mais grave: interdição e apreensão pesam mais; infração ligada ao combustível pesa mais que infração de papelada; notificação e medida corretiva pesam pouco. Infração de aferição da bomba, volume ou qualidade do combustível nos últimos 12 meses limita a nota em 2,5 e tira o posto da recomendação. Com o Google ligado, a média das avaliações entra com peso de 35%, puxada para 4,0 quando há poucas avaliações.</p></details></div>' +
       '<div class="card"><span class="b15">Seus abastecimentos aqui</span>' +
+      (() => {
+        const u = ctx.usage().find((x) => x.station_id === s.c);
+        const v = u ? usageVerdict(u) : null;
+        return v ? '<span class="hint ' + v.tone + '">' + esc(v.text) + (u!.kml ? ' Média daqui: ' + fmt(u!.kml, 2) + ' km/l.' : '') + '</span>' : '';
+      })() +
       (mine.length ? '<ul class="ev-list">' + mine.slice(0, 5).map((f) => '<li><span class="d">' + dm(f.date) + '/' + f.date.slice(2, 4) + '</span><span>' + FUEL[f.fuel as Fuel] + ' · ' + brl(f.price_per_l) + '/l · ' + brl(f.total_brl) + '</span></li>').join('') + '</ul>' : '<span class="hint">Nenhum ainda. Abastecendo por aqui, o preço que você pagar passa a valer como o dado mais recente deste posto.</span>') + '</div>';
     ctx.openSheet('posto-sheet');
   }
   $('posto-route').addEventListener('click', () => {
     if (!shown) return;
-    window.open('https://www.google.com/maps/dir/?api=1&destination=' + shown.la + ',' + shown.lo, '_blank', 'noopener');
+    window.open(mapsUrl(shown), '_blank', 'noopener');
   });
   $('posto-fill').addEventListener('click', () => {
     if (!shown) return;
@@ -596,7 +669,10 @@ export function initPostos(ctx: Ctx) {
     const { rec } = compute(rs.base);
     const where = kind === 'rota' ? 'no seu caminho' : kind === 'casa' ? 'perto de casa' : 'perto do trabalho';
     if (!rec.best) {
-      el.innerHTML = head + '<p class="hint">Sem preço recente nos postos ' + where + '.</p>';
+      const r = bestWithoutPrice(compute(rs.base).rows);
+      el.innerHTML = r
+        ? '<button type="button" class="home-rec" data-postos="' + kind + '"><span class="l">Onde abastecer · ' + where + '</span><span class="t">' + esc(r.s.n) + '</span><span class="s">Sem preço recente nos postos daqui · melhor avaliado e mais perto (confiabilidade ' + fmt(r.rel.score, 1) + ')</span><span class="chev">' + ICON.chev + '</span></button>'
+        : head + '<p class="hint">Sem preço recente nos postos ' + where + '.</p>';
       return;
     }
     const b = rec.best;
@@ -606,6 +682,14 @@ export function initPostos(ctx: Ctx) {
       '<span class="t"><i class="dot ' + (b.fuel === 'gasolina' ? 'gas' : 'eth') + '"></i>' + FUEL[b.fuel] + ' no ' + esc(b.s.n) + '</span>' +
       '<span class="s">' + brl(b.price.price) + '/l · ' + dist + ' · confiabilidade ' + fmt(b.rel.score, 1) + '</span>' +
       (rec.bestOther ? '<span class="s save">' + brl(rec.bestOther.cost - b.cost) + ' a menos que ' + FUEL[rec.bestOther.fuel].toLowerCase() + ' para rodar ' + Math.round(ctx.car().model.kmTank) + ' km</span>' : '') +
+      (() => {
+        const fav = favorite();
+        if (!fav || fav.s.c === b.s.c) return fav ? '<span class="s">É o seu posto de sempre.</span>' : '';
+        const o = rowFor(fav.s, rs.base).best;
+        if (!o || o.stale) return '';
+        const diff = o.cost - b.cost;
+        return diff > 0.5 ? '<span class="s">No seu posto (' + esc(fav.s.n) + ') sairia ≈ ' + brl(diff) + ' a mais.</span>' : '';
+      })() +
       '<span class="chev">' + ICON.chev + '</span></button>';
   }
   $('home-postos').addEventListener('click', (e) => {
@@ -614,6 +698,25 @@ export function initPostos(ctx: Ctx) {
     if (el.closest('[data-locais]')) return openLocais();
     if (p) open((p.dataset.postos || undefined) as BaseKind | undefined, 'inicio');
   });
+
+  /** Sugestões para o campo "Posto" do abastecimento: os que você usa e os perto de casa, do trabalho e de onde você está. */
+  async function stationChoices(): Promise<{ label: string; id: string }[]> {
+    const f = await ensureFile();
+    if (!f) return [];
+    const out = new Map<string, Station>();
+    for (const u of ctx.usage()) {
+      const s = f.postos.find((x) => x.c === u.station_id);
+      if (s) out.set(s.c, s);
+    }
+    const centers = [here?.p, place('casa'), place('trabalho')].filter(Boolean) as LatLon[];
+    const near = f.postos
+      .map((s) => ({ s, d: Math.min(...centers.map((c) => haversineKm(c, { lat: s.la, lon: s.lo }))) }))
+      .filter((x) => x.d <= 3)
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 25);
+    for (const x of near) out.set(x.s.c, x.s);
+    return [...out.values()].map((s) => ({ label: stationLabel(s), id: s.c }));
+  }
 
   /** Chamado quando os dados do app mudam (sincronização, novo abastecimento, locais). */
   function refresh() {
@@ -624,5 +727,5 @@ export function initPostos(ctx: Ctx) {
     renderLocal();
   }
 
-  return { open, openLocais, refresh, renderHome, BASE_LABEL };
+  return { open, openLocais, refresh, renderHome, stationChoices, BASE_LABEL };
 }

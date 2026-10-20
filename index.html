@@ -181,7 +181,7 @@
       <div class="grid2">
         <label class="field">Data<input class="inp sm" id="f-date" type="date"></label>
         <label class="field">Autonomia restante<input class="inp sm" id="f-range" inputmode="numeric" autocomplete="off" placeholder="km"></label>
-        <label class="field full">Posto<input class="inp sm" id="f-station" autocomplete="off" placeholder="Opcional"></label>
+        <label class="field full">Posto<input class="inp sm" id="f-station" list="f-station-list" autocomplete="off" placeholder="Opcional"><datalist id="f-station-list"></datalist></label>
         <label class="field full">Observação<input class="inp sm" id="f-note" autocomplete="off" placeholder="Viagem, aditivada…"></label>
       </div>
     </details>
@@ -257,7 +257,7 @@
     <span></span>
   </div>
   <div class="sheet-body"><div class="stack" id="posto-body"></div></div>
-  <div class="sheet-foot"><div class="btn-row"><button type="button" class="btn" id="posto-route">Abrir rota</button><button type="button" class="btn primary" id="posto-fill">Abastecer aqui</button></div></div>
+  <div class="sheet-foot"><div class="btn-row"><button type="button" class="btn" id="posto-route">Abrir no Maps</button><button type="button" class="btn primary" id="posto-fill">Abastecer aqui</button></div></div>
 </div>
 
 <!-- Outro local -->

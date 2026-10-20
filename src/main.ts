@@ -10,8 +10,8 @@ import { db, getMeta, setMeta, softDelete, stamp, uuid, type FuelLog, type FuelT
 import { aggregate, intervals, kmPerDay, parseIntLoose, parseNum, sortLogs, type Interval } from './calc';
 import { exportBackup, importBackup } from './backup';
 import { currentSession, getHomePrefs, getPlaces, onSyncStatus, scheduleSync, sendLoginEmail, setHomePrefs, signOut, startAutoSync, supabase, sync, verifyCode, type HomePrefs, type Places, type SyncStatus } from './sync';
-import { initPostos, type CarInfo } from './postos-ui';
-import type { Fuel, OwnPrice, Station } from './postos';
+import { initPostos, stationLabel, type CarInfo } from './postos-ui';
+import { stationUsage, type Fuel, type OwnPrice, type Station } from './postos';
 import { initMaintenance, currentKmOf } from './manut';
 import { itemStates, lastDoneByKey, progressOf, sortStates } from './maintenance';
 import { planByKey } from './plans';
@@ -103,6 +103,7 @@ const postos = initPostos({
   logsAt: (cnpj) => S.logs.filter((f) => f.station_id === cnpj).sort((a, b) => b.date.localeCompare(a.date)),
   places: () => S.places,
   fillAt: (s, fuel, price) => openFillAt(s, fuel, price),
+  usage: () => stationUsage(carLogs(), intervals(carLogs()), todayISO()),
 });
 
 liveQuery(async () => {
@@ -506,6 +507,7 @@ function openFill(id: string | null) {
   $<HTMLInputElement>('f-odo').placeholder = last ? String(last.odometer_km + 380) : v.initial_km ? String(v.initial_km) : '';
   const lastStation = [...fs].reverse().find((f) => f.station)?.station;
   $<HTMLInputElement>('f-station').placeholder = lastStation ?? 'Opcional';
+  fillStationChoices();
   $<HTMLInputElement>('f-price').placeholder = last ? fmt(last.price_per_l, 2) : '0,00';
   ($('f-more') as HTMLDetailsElement).open = !!(editing && (editing.station || editing.note || editing.range_left_km != null));
   recent = editing ? ['total', 'liters'] : [];
@@ -516,11 +518,19 @@ function openFill(id: string | null) {
 }
 $('add-btn').addEventListener('click', () => openFill(null));
 
+/** Sugestões do campo Posto: escolher uma liga o abastecimento ao posto (CNPJ). */
+let stationIds = new Map<string, string>();
+async function fillStationChoices() {
+  const list = await postos.stationChoices();
+  stationIds = new Map(list.map((x) => [x.label, x.id]));
+  $('f-station-list').innerHTML = list.map((x) => '<option value="' + esc(x.label) + '"></option>').join('');
+}
+
 function openFillAt(s: Station, fuel: Fuel, price: number | null) {
   openFill(null);
   if (!current()) return;
-  fillStation = { id: s.c, name: s.n };
-  $<HTMLInputElement>('f-station').value = s.n;
+  fillStation = { id: s.c, name: stationLabel(s) };
+  $<HTMLInputElement>('f-station').value = fillStation.name;
   if (current()!.fuel_type === 'flex') $<HTMLInputElement>(fuel === 'etanol' ? 'f-fuel-e' : 'f-fuel-g').checked = true;
   if (price) {
     $<HTMLInputElement>('f-price').value = fmt(price, Math.round(price * 1000) % 10 ? 3 : 2);
@@ -635,7 +645,7 @@ $('fill-sheet').addEventListener('submit', async (e) => {
     full_tank: $<HTMLInputElement>('f-full').checked,
     range_left_km: Number.isFinite(rng) ? rng : null,
     station: val('f-station').trim().slice(0, 80) || null,
-    station_id: fillStation && val('f-station').trim() === fillStation.name ? fillStation.id : null,
+    station_id: fillStation && val('f-station').trim() === fillStation.name ? fillStation.id : stationIds.get(val('f-station').trim()) ?? null,
     note: val('f-note').trim().slice(0, 140) || null,
   });
   const wasEdit = !!editing;

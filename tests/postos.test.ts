@@ -82,3 +82,35 @@ test('infração só de documentos reduz a nota, mas não tira da recomendação
   assert.equal(r.score, 4.5);
   assert.equal(r.level, 'ok');
 });
+
+test('lista: preço mais recente primeiro, depois o mais barato; sem preço por nota e distância', async () => {
+  const { sortRows: sr, bestWithoutPrice } = await import('../src/postos.ts');
+  const stations = [
+    st('velho-barato', at(1, 0), { gc: [6.0, '2026-10-01'] }),
+    st('novo-caro', at(1, 0), { gc: [6.9, '2026-10-08'] }),
+    st('novo-barato', at(2, 0), { gc: [6.5, '2026-10-08'] }),
+    st('sem-preco-perto', at(0.5, 0), {}, { n: 1, ult: '2025-01-01', ev: [] }),
+    st('sem-preco-longe', at(4, 0), {}, { n: 1, ult: '2025-01-01', ev: [] }),
+  ];
+  const rows = stationsFor(stations, { kind: 'ponto', at: base, radiusKm: 6 }, { ...car, fuels: ['gasolina'] }, [], today);
+  assert.deepEqual(sr(rows).map((r) => r.s.c), ['novo-barato', 'novo-caro', 'velho-barato', 'sem-preco-perto', 'sem-preco-longe']);
+  const semPreco = rows.filter((r) => !r.best);
+  assert.equal(bestWithoutPrice(semPreco)!.s.c, 'sem-preco-perto');
+});
+
+test('seu posto: mais usado e rendimento dos tanques que começaram nele', async () => {
+  const { stationUsage, usageVerdict } = await import('../src/postos.ts');
+  const f = (id: string, date: string, sid: string | null) => ({ id, date, station_id: sid, station: sid ? 'Posto ' + sid : null, fuel: 'gasolina', full_tank: true });
+  const fills = [f('1', '2026-06-01', 'A'), f('2', '2026-07-01', 'A'), f('3', '2026-08-01', 'B'), f('4', '2026-09-01', 'A'), f('5', '2026-10-01', 'A')];
+  const tanks = [
+    { start_id: '1', kml: 9.0, fuel: 'gasolina' }, { start_id: '2', kml: 9.1, fuel: 'gasolina' },
+    { start_id: '3', kml: 10.5, fuel: 'gasolina' }, { start_id: '4', kml: 9.0, fuel: 'gasolina' },
+  ];
+  const u = stationUsage(fills, tanks, today);
+  assert.equal(u[0].station_id, 'A');
+  assert.equal(u[0].fills, 4);
+  assert.equal(u[0].tanks, 3);
+  assert.ok(u[0].delta! < -0.03);
+  assert.equal(usageVerdict(u[0])!.tone, 'neutral'); // 3,6% abaixo: ainda dentro do ruído
+  assert.equal(usageVerdict(u[1])!.text.startsWith('1 tanque'), true);
+});

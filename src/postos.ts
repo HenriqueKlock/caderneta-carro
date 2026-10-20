@@ -242,15 +242,98 @@ export function stationsFor(
   return rows;
 }
 
-/** Ordem da lista: recomendáveis pelo custo; depois os sem preço recente e os de baixa confiabilidade, por distância. */
+/** Data do preço mais novo do posto (entre os combustíveis que o carro usa), ou null. */
+export function priceDate(r: StationRow): string | null {
+  return r.opts.reduce<string | null>((d, o) => (!d || o.price.date > d ? o.price.date : d), null);
+}
+
+/**
+ * Ordem da lista: primeiro os preços mais recentes (e, no mesmo dia, o mais em conta);
+ * depois os de confiabilidade baixa e os de preço antigo; por fim os sem preço, pela nota e pela distância.
+ */
 export function sortRows(rows: StationRow[]): StationRow[] {
-  const ok = (r: StationRow) => !!r.best && !r.best.stale && r.rel.level !== 'evitar';
+  const group = (r: StationRow) => (!r.best ? 3 : r.best.stale ? 2 : r.rel.level === 'evitar' ? 1 : 0);
   return rows.slice().sort((a, b) => {
-    const oa = ok(a), ob = ok(b);
-    if (oa !== ob) return oa ? -1 : 1;
-    if (oa && ob) return a.best!.cost - b.best!.cost;
-    return a.distKm - b.distKm;
+    const ga = group(a), gb = group(b);
+    if (ga !== gb) return ga - gb;
+    if (ga < 3) {
+      const da = priceDate(a)!, db = priceDate(b)!;
+      if (da !== db) return db.localeCompare(da);
+      return a.best!.cost - b.best!.cost;
+    }
+    return b.rel.score - a.rel.score || a.distKm - b.distKm;
   });
+}
+
+/** Sem nenhum preço recente: o posto de melhor nota e mais perto (cada km de distância vale 0,25 de nota). */
+export function bestWithoutPrice(rows: StationRow[]): StationRow | null {
+  const cands = rows.filter((r) => r.rel.level !== 'evitar');
+  if (!cands.length) return null;
+  return cands.slice().sort((a, b) => (b.rel.score - 0.25 * b.distKm) - (a.rel.score - 0.25 * a.distKm))[0];
+}
+
+/* ---------- seu posto: uso e rendimento dos tanques ---------- */
+export interface FillLike { id: string; date: string; station_id?: string | null; station?: string | null; fuel: string; full_tank: boolean }
+export interface TankLike { start_id: string; kml: number; fuel: string }
+export interface StationUse {
+  station_id: string;
+  name: string | null;
+  fills: number;
+  last: string;
+  tanks: number;
+  kml: number | null;
+  /** Rendimento dos tanques deste posto vs. a sua média do mesmo combustível (0,03 = 3% acima). */
+  delta: number | null;
+}
+
+/** Postos usados, do mais frequente (últimos 12 meses) para o menos; o rendimento conta o tanque que começou ali. */
+export function stationUsage(fills: FillLike[], tanks: TankLike[], today: string): StationUse[] {
+  const byId = new Map(fills.map((f) => [f.id, f]));
+  const avg = new Map<string, number>();
+  for (const fuel of new Set(tanks.map((t) => t.fuel))) {
+    const ts = tanks.filter((t) => t.fuel === fuel);
+    avg.set(fuel, ts.reduce((a, t) => a + t.kml, 0) / ts.length);
+  }
+  const map = new Map<string, StationUse & { ratios: number[]; kmls: number[]; recent: number }>();
+  for (const f of fills) {
+    if (!f.station_id) continue;
+    const u = map.get(f.station_id) ?? { station_id: f.station_id, name: f.station ?? null, fills: 0, last: f.date, tanks: 0, kml: null, delta: null, ratios: [], kmls: [], recent: 0 };
+    u.fills++;
+    if (ageDays(f.date, today) <= 365) u.recent++;
+    if (f.date >= u.last) { u.last = f.date; u.name = f.station ?? u.name; }
+    map.set(f.station_id, u);
+  }
+  for (const t of tanks) {
+    const f = byId.get(t.start_id);
+    const u = f?.station_id ? map.get(f.station_id) : undefined;
+    const a = avg.get(t.fuel);
+    if (!u || !a || t.fuel === 'misto') continue;
+    u.tanks++;
+    u.kmls.push(t.kml);
+    u.ratios.push(t.kml / a);
+  }
+  return [...map.values()]
+    .map(({ ratios, kmls, recent, ...u }) => ({
+      ...u,
+      kml: kmls.length ? kmls.reduce((a, b) => a + b, 0) / kmls.length : null,
+      delta: ratios.length ? ratios.reduce((a, b) => a + b, 0) / ratios.length - 1 : null,
+      _recent: recent,
+    }))
+    .sort((a, b) => b._recent - a._recent || b.fills - a.fills || b.last.localeCompare(a.last))
+    .map(({ _recent, ...u }) => u);
+}
+
+/** Frase curta sobre o rendimento; só afirma algo com 2 tanques ou mais. */
+export function usageVerdict(u: StationUse): { tone: 'ok' | 'bad' | 'neutral'; text: string } | null {
+  if (u.delta == null || u.tanks === 0) return null;
+  const pct = Math.round(Math.abs(u.delta) * 100);
+  if (u.tanks < 2) return { tone: 'neutral', text: '1 tanque medido daqui; com mais um dá para comparar com a sua média.' };
+  if (pct < 3) return { tone: 'ok', text: 'Seus tanques daqui rendem como a sua média (' + u.tanks + ' tanques).' };
+  if (u.delta > 0) return { tone: 'ok', text: 'Seus tanques daqui rendem ' + pct + '% acima da sua média (' + u.tanks + ' tanques).' };
+  return {
+    tone: pct >= 5 && u.tanks >= 3 ? 'bad' : 'neutral',
+    text: 'Seus tanques daqui rendem ' + pct + '% abaixo da sua média (' + u.tanks + ' tanques)' + (pct >= 5 && u.tanks >= 3 ? ': pode ser combustível ou bomba; vale comparar com outro posto.' : '.'),
+  };
 }
 
 export interface Recommendation {
