@@ -33,6 +33,14 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         navigateFallback: base + 'index.html',
         cleanupOutdatedCaches: true,
+        // Lista de postos (atualizada toda semana): abre na hora com a cópia do celular e atualiza por trás
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => /\/dados\/postos-[A-Z-]+\.json$/.test(url.pathname),
+            handler: 'StaleWhileRevalidate',
+            options: { cacheName: 'postos', expiration: { maxEntries: 4 } },
+          },
+        ],
       },
     }),
   ],

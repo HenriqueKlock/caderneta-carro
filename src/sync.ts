@@ -134,6 +134,7 @@ export async function sync(): Promise<void> {
     for (const t of TABLES) await push(t);
     for (const t of TABLES) await pull(t);
     await syncSettings();
+    await syncPlaces();
     if (!owner) await setMeta('owner_user_id', session.user.id);
     const at = new Date().toISOString();
     await setMeta('last_sync_at', at);
@@ -307,4 +308,74 @@ async function syncSettings() {
     const ids = (Array.isArray(data.home_indicators) ? data.home_indicators : []).filter(isIndicatorId);
     await setMeta(PREFS_KEY, { ids, updated_at: remoteAt, dirty: false });
   }
+}
+
+
+/* ---------- casa, trabalho e o caminho entre eles ---------- */
+
+export type PlaceKind = 'casa' | 'trabalho' | 'rota';
+export interface PlaceRow {
+  kind: PlaceKind;
+  label: string | null;
+  lat: number | null;
+  lon: number | null;
+  data: Record<string, unknown>;
+  updated_at: string;
+  deleted_at: string | null;
+  dirty: boolean;
+}
+export type Places = Partial<Record<PlaceKind, PlaceRow>>;
+const PLACES_KEY = 'places';
+
+export async function getPlaces(): Promise<Places> {
+  return getMeta<Places>(PLACES_KEY, {});
+}
+
+/** Grava (ou apaga, com `null`) um local no aparelho e agenda o envio para a conta. */
+export async function setPlace(kind: PlaceKind, v: Pick<PlaceRow, 'label' | 'lat' | 'lon' | 'data'> | null) {
+  const cur = await getPlaces();
+  const at = now();
+  cur[kind] = v
+    ? { kind, ...v, updated_at: at, deleted_at: null, dirty: true }
+    : { kind, label: null, lat: null, lon: null, data: {}, updated_at: at, deleted_at: at, dirty: true };
+  await setMeta(PLACES_KEY, cur);
+  scheduleSync(800);
+}
+
+async function syncPlaces() {
+  const local = await getPlaces();
+  const dirty = Object.values(local).filter((p): p is PlaceRow => !!p?.dirty);
+  if (dirty.length) {
+    const { error } = await supabase
+      .from('user_places')
+      .upsert(dirty.map(({ dirty: _d, ...r }) => r), { onConflict: 'user_id,kind' });
+    if (error) throw error;
+  }
+  const { data, error } = await supabase.from('user_places').select('kind, label, lat, lon, data, updated_at, deleted_at');
+  if (error) throw error;
+  const cur = await getPlaces();
+  for (const p of dirty) {
+    const c = cur[p.kind];
+    if (c && c.updated_at === p.updated_at) c.dirty = false;
+  }
+  for (const r of data ?? []) {
+    const kind = r.kind as PlaceKind;
+    const remoteAt = new Date(r.updated_at).toISOString();
+    const c = cur[kind];
+    if (c && (c.dirty || c.updated_at >= remoteAt)) continue;
+    cur[kind] = {
+      kind, label: r.label, lat: r.lat, lon: r.lon, data: (r.data ?? {}) as Record<string, unknown>,
+      updated_at: remoteAt, deleted_at: r.deleted_at ? new Date(r.deleted_at).toISOString() : null, dirty: false,
+    };
+  }
+  await setMeta(PLACES_KEY, cur);
+}
+
+/* ---------- notas do Google (opcional: só funciona com a chave configurada no servidor) ---------- */
+export interface GooglePlace { id: string; name: string; lat: number; lon: number; rating: number | null; count: number }
+export async function googleNearby(lat: number, lon: number, radius_m: number): Promise<{ configured: boolean; places: GooglePlace[] }> {
+  if (!(await currentSession())) return { configured: false, places: [] };
+  const { data, error } = await supabase.functions.invoke('postos-google', { body: { lat, lon, radius_m } });
+  if (error) throw error;
+  return data as { configured: boolean; places: GooglePlace[] };
 }

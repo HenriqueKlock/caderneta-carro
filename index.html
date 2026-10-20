@@ -40,14 +40,7 @@
     <div class="stat-grid" id="home-inds"></div>
     <div id="home-next"></div>
 
-    <div class="card calc-mini" id="home-calc">
-      <div class="title"><span>Etanol ou gasolina?</span><span class="hint" id="hc-rule">regra dos 70%</span></div>
-      <div class="row2">
-        <label class="field">Gasolina R$/l<input class="inp mini" id="hc-gas" inputmode="decimal" autocomplete="off"></label>
-        <label class="field">Etanol R$/l<input class="inp mini" id="hc-eth" inputmode="decimal" autocomplete="off" placeholder="ex.: 4,79"></label>
-      </div>
-      <div class="res" id="hc-res"></div>
-    </div>
+    <div class="card home-postos" id="home-postos"></div>
   </section>
 
   <!-- Histórico -->
@@ -120,16 +113,34 @@
     </div>
     <div class="card" id="c-verdict"></div>
   </section>
-</main>
+  <!-- Postos -->
+  <section id="v-postos" class="view" aria-label="Postos" hidden>
+    <button type="button" class="back" id="p-back"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg><span id="p-back-label">Início</span></button>
+    <div class="page-head" style="padding-top:0"><h1>Postos</h1><button type="button" class="link" id="p-outro">Outro local</button></div>
+    <div class="seg4" role="tablist" aria-label="Buscar a partir de" id="p-base">
+      <button type="button" role="tab" data-base="agora" aria-selected="true">Agora</button>
+      <button type="button" role="tab" data-base="casa" aria-selected="false">Casa</button>
+      <button type="button" role="tab" data-base="trabalho" aria-selected="false">Trabalho</button>
+      <button type="button" role="tab" data-base="rota" aria-selected="false">Caminho</button>
+    </div>
+    <div class="p-where" id="p-where"></div>
+    <div id="p-body" class="view" style="gap:12px"></div>
+  </section>
 
-<button type="button" class="fab" id="add-btn" aria-label="Novo abastecimento">
-  <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Abastecer
-</button>
+  <!-- Casa e trabalho -->
+  <section id="v-locais" class="view" aria-label="Casa e trabalho" hidden>
+    <button type="button" class="back" data-go="mais"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 6l-6 6 6 6"/></svg>Mais</button>
+    <div class="page-head" style="padding-top:0"><h1>Casa e trabalho</h1></div>
+    <p class="hint" style="margin-top:-6px">Com os dois cadastrados, a aba Postos compara onde sai mais barato abastecer: perto de casa, perto do trabalho ou no caminho.</p>
+    <div id="l-body" class="view" style="gap:12px"></div>
+  </section>
+</main>
 
 <nav class="tabbar" aria-label="Seções">
   <div class="in" role="tablist">
     <button type="button" class="tab" role="tab" data-view="inicio" aria-selected="true"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Início</button>
     <button type="button" class="tab" role="tab" data-view="hist" aria-selected="false"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>Histórico</button>
+    <button type="button" class="tab-add" id="add-btn"><span><svg aria-hidden="true" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>Abastecer</button>
     <button type="button" class="tab" role="tab" data-view="manut" aria-selected="false"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L4 16.8V20h3.2l5.3-5.3a4 4 0 0 0 5.2-5.4l-2.4 2.4-2.4-.6-.6-2.4z"/></svg>Manutenção</button>
     <button type="button" class="tab" role="tab" data-view="mais" aria-selected="false"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>Mais</button>
   </div>
@@ -235,6 +246,31 @@
       <div class="set-row"><div><div class="t">Versão</div><div class="d" id="ver-d"></div></div></div>
     </div>
     <button type="button" class="btn" data-close>Fechar</button>
+  </div></div>
+</div>
+
+<!-- Ficha do posto (tela cheia) -->
+<div class="sheet full" id="posto-sheet" role="dialog" aria-labelledby="posto-title">
+  <div class="sheet-bar">
+    <button type="button" class="text-btn" data-close style="justify-self:start">Fechar</button>
+    <h2 id="posto-title">Posto</h2>
+    <span></span>
+  </div>
+  <div class="sheet-body"><div class="stack" id="posto-body"></div></div>
+  <div class="sheet-foot"><div class="btn-row"><button type="button" class="btn" id="posto-route">Abrir rota</button><button type="button" class="btn primary" id="posto-fill">Abastecer aqui</button></div></div>
+</div>
+
+<!-- Outro local -->
+<div class="sheet" id="local-sheet" role="dialog" aria-labelledby="local-title">
+  <div class="grab"></div>
+  <div class="sheet-body"><div class="stack">
+    <h2 id="local-title" style="font-size:22px;font-weight:600">Buscar postos perto de</h2>
+    <button type="button" class="btn primary block" id="local-gps"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7"/></svg>Minha localização agora</button>
+    <span class="hint" style="margin-top:-8px">O celular pede permissão uma vez. A localização atual não é guardada nem enviada para a conta.</span>
+    <form class="pl-form" id="local-form"><input class="inp sm" id="local-q" placeholder="Endereço, bairro ou cidade" autocomplete="off" enterkeyhint="search" aria-label="Endereço, bairro ou cidade"><button type="submit" class="btn primary sm" id="local-go">Buscar</button></form>
+    <div class="list-card" id="local-results" hidden></div>
+    <h3>Seus locais</h3>
+    <div class="list-card" id="local-saved"></div>
   </div></div>
 </div>
 

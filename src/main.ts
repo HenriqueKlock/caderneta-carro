@@ -9,7 +9,9 @@ import { registerSW } from 'virtual:pwa-register';
 import { db, getMeta, setMeta, softDelete, stamp, uuid, type FuelLog, type FuelType, type PendingFile, type Service, type ServiceItem, type Vehicle, type VehicleFuel } from './db';
 import { aggregate, intervals, kmPerDay, parseIntLoose, parseNum, sortLogs, type Interval } from './calc';
 import { exportBackup, importBackup } from './backup';
-import { currentSession, getHomePrefs, onSyncStatus, scheduleSync, sendLoginEmail, setHomePrefs, signOut, startAutoSync, supabase, sync, verifyCode, type HomePrefs, type SyncStatus } from './sync';
+import { currentSession, getHomePrefs, getPlaces, onSyncStatus, scheduleSync, sendLoginEmail, setHomePrefs, signOut, startAutoSync, supabase, sync, verifyCode, type HomePrefs, type Places, type SyncStatus } from './sync';
+import { initPostos, type CarInfo } from './postos-ui';
+import type { Fuel, OwnPrice, Station } from './postos';
 import { initMaintenance, currentKmOf } from './manut';
 import { itemStates, lastDoneByKey, progressOf, sortStates } from './maintenance';
 import { planByKey } from './plans';
@@ -50,10 +52,12 @@ interface State {
   items: ServiceItem[];
   files: PendingFile[];
   prefs: HomePrefs;
+  places: Places;
 }
 let S: State = {
   vehicles: [], logs: [], currentId: null, calc: { gas: '', eth: '', ratio: 0.7 }, pending: 0, services: [], items: [], files: [],
   prefs: { ids: ['gasto_mes', 'km_mes'], updated_at: '', dirty: false },
+  places: {},
 };
 let view = 'inicio';
 let histFilter: 'tudo' | 'abast' | 'manut' = 'tudo';
@@ -72,8 +76,37 @@ const carServices = () => {
 
 const maint = initMaintenance({ $, fmt, brl, km, esc, pl, todayISO, toast, openSheet, closeSheets, parseNum, parseIntLoose });
 
+/** Rendimento do carro atual para comparar postos e combustíveis. */
+function carInfo(): CarInfo {
+  const v = current();
+  const iv = intervals(carLogs());
+  const g = aggregate(iv.filter((x) => x.fuel === 'gasolina'));
+  const e = aggregate(iv.filter((x) => x.fuel === 'etanol'));
+  // Um tanque fora da curva não pode virar o rendimento do etanol: fora de 55–85%, volta à regra dos 70%
+  const raw = g.n > 0 && e.n > 0 ? e.kml / g.kml : NaN;
+  const measured = raw >= 0.55 && raw <= 0.85;
+  const ratio = measured ? raw : Number(S.calc.ratio) || 0.7;
+  const kmlG = g.n ? g.kml : e.n ? e.kml / ratio : 10;
+  const kmlE = measured ? e.kml : kmlG * ratio;
+  const fulls = carLogs().filter((f) => f.full_tank).slice(-6);
+  const liters = fulls.length ? fulls.reduce((a, f) => a + f.liters, 0) / fulls.length : 45;
+  const ft = v?.fuel_type ?? 'flex';
+  const fuels: Fuel[] = ft === 'flex' ? ['gasolina', 'etanol'] : ft === 'gasolina' ? ['gasolina'] : ft === 'etanol' ? ['etanol'] : [];
+  return { name: v?.name ?? 'carro', model: { kmlG, kmlE, measured, fuels, kmTank: Math.max(100, Math.round((liters * kmlG) / 10) * 10) } };
+}
+
+const postos = initPostos({
+  $, fmt, brl, esc, toast, openSheet, closeSheets, show, todayISO,
+  car: carInfo,
+  own: (): OwnPrice[] =>
+    S.logs.filter((f) => f.station_id && (f.fuel === 'gasolina' || f.fuel === 'etanol')).map((f) => ({ station_id: f.station_id!, fuel: f.fuel as Fuel, price: f.price_per_l || f.total_brl / f.liters, date: f.date })),
+  logsAt: (cnpj) => S.logs.filter((f) => f.station_id === cnpj).sort((a, b) => b.date.localeCompare(a.date)),
+  places: () => S.places,
+  fillAt: (s, fuel, price) => openFillAt(s, fuel, price),
+});
+
 liveQuery(async () => {
-  const [vehicles, logs, currentId, calc, dirty, services, items, files, prefs] = await Promise.all([
+  const [vehicles, logs, currentId, calc, dirty, services, items, files, prefs, places] = await Promise.all([
     db.vehicles.toArray(),
     db.fuel_logs.toArray(),
     getMeta<string | null>('current_vehicle', null),
@@ -83,6 +116,7 @@ liveQuery(async () => {
     db.service_items.toArray(),
     db.pending_files.toArray(),
     getHomePrefs(),
+    getPlaces(),
   ]);
   return {
     vehicles: vehicles.filter((v) => !v.deleted_at),
@@ -94,6 +128,7 @@ liveQuery(async () => {
     items: items.filter((x) => !x.deleted_at),
     files,
     prefs,
+    places,
   } as State;
 }).subscribe({
   next: (s) => {
@@ -125,12 +160,13 @@ function render() {
   renderIndicadores(v);
   renderCalc(v, fs, iv);
   maint.render({ vehicle: v, logs: fs, services: S.services, items: S.items, pending: S.files });
+  postos.refresh();
 }
 
 function renderInicio(v: Vehicle | undefined, fs: FuelLog[], iv: Interval[]) {
   const empty = !v;
   $('home-empty').hidden = !empty;
-  ['hero', 'home-inds-head', 'home-inds', 'home-next', 'home-calc'].forEach((id) => ($(id).hidden = empty));
+  ['hero', 'home-inds-head', 'home-inds', 'home-next'].forEach((id) => ($(id).hidden = empty));
   if (!v) return;
   const all = aggregate(iv);
   if (iv.length) {
@@ -252,7 +288,11 @@ function renderHist(v: Vehicle | undefined, fs: FuelLog[], iv: Interval[]) {
 
 function renderMais(v: Vehicle | undefined) {
   const cars = activeVehicles().map((c) => c.name).join(' · ') || 'Nenhum cadastrado';
+  const pin = '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>';
+  const pls = [S.places.casa, S.places.trabalho].filter((p) => p && !p.deleted_at).length;
   $('mais-1').innerHTML =
+    '<button type="button" class="row nav" data-go="postos"><span class="ic orange">' + ICON.pump + '</span><span class="mid"><span class="a">Onde abastecer</span><span class="b">Postos, preços e confiabilidade</span></span><span class="chev">' + ICON.chev + '</span></button>' +
+    '<button type="button" class="row nav" data-go="locais"><span class="ic orange">' + pin + '</span><span class="mid"><span class="a">Casa e trabalho</span><span class="b">' + (pls === 2 ? 'Cadastrados' : pls === 1 ? 'Falta um endereço' : 'Base para comparar postos') + '</span></span><span class="chev">' + ICON.chev + '</span></button>' +
     '<button type="button" class="row nav" data-go="indicadores"><span class="ic blue">' + ICON.chart + '</span><span class="mid"><span class="a">Indicadores</span><span class="b">Gráficos e o que aparece no início</span></span><span class="chev">' + ICON.chev + '</span></button>' +
     '<button type="button" class="row nav" data-go="etanol"><span class="ic green">%</span><span class="mid"><span class="a">Etanol × gasolina</span><span class="b">Calculadora com o rendimento do seu carro</span></span><span class="chev">' + ICON.chev + '</span></button>' +
     '<button type="button" class="row nav" id="mais-cars"><span class="ic gray">' + activeVehicles().length + '</span><span class="mid"><span class="a">Carros</span><span class="b">' + esc(cars) + '</span></span><span class="chev">' + ICON.chev + '</span></button>';
@@ -328,14 +368,12 @@ function calcModel(v: Vehicle | undefined, fs: FuelLog[], iv: Interval[]) {
 function renderCalc(v: Vehicle | undefined, fs: FuelLog[], iv: Interval[]) {
   const m = calcModel(v, fs, iv);
   const c = S.calc;
-  for (const [gasId, ethId] of [['c-gas', 'c-eth'], ['hc-gas', 'hc-eth']]) {
+  for (const [gasId, ethId] of [['c-gas', 'c-eth']]) {
     const g = $<HTMLInputElement>(gasId), e = $<HTMLInputElement>(ethId);
     if (document.activeElement !== g) g.value = c.gas || '';
     if (document.activeElement !== e) e.value = c.eth || '';
     if (Number.isFinite(m.gasDefault)) g.placeholder = fmt(m.gasDefault, 2);
   }
-  $('home-calc').hidden = !v || !m.flex;
-  $('hc-rule').textContent = m.measured ? 'rendimento medido: ' + Math.round(m.ratio * 100) + '%' : 'regra dos 70%';
   const thr = m.gas * m.ratio;
   const rEl = $<HTMLInputElement>('c-ratio');
   rEl.disabled = m.measured;
@@ -349,15 +387,12 @@ function renderCalc(v: Vehicle | undefined, fs: FuelLog[], iv: Interval[]) {
   $('c-thr').textContent = Number.isFinite(m.gas) ? brl(thr) : '–';
   $('c-thr-sub').textContent = Number.isFinite(m.gas) ? 'com gasolina a ' + brl(m.gas) + ' e rendimento de ' + Math.round(m.ratio * 100) + '%' : 'Informe o preço da gasolina.';
   const box = $('c-verdict');
-  const hres = $('hc-res');
   if (!Number.isFinite(m.gas) || !Number.isFinite(m.eth)) {
     box.innerHTML = '<span class="hint">Digite o preço do etanol no posto para ver qual compensa.</span>';
-    hres.innerHTML = Number.isFinite(m.gas) ? 'Etanol compensa abaixo de <b class="eth">' + brl(thr) + '</b>' : 'Digite os preços do posto.';
     return;
   }
   const pct = m.eth / m.gas;
   const ethWins = pct < m.ratio;
-  hres.innerHTML = 'Etanol a ' + fmt(pct * 100, 0) + '% da gasolina: <b class="' + (ethWins ? 'eth' : 'gas') + '">' + (ethWins ? 'vá de etanol' : 'fique na gasolina') + '</b>';
   const rpkG = m.gas / m.kmlG, rpkE = m.eth / m.kmlE;
   const diffM = Math.abs(rpkG - rpkE) * m.kmMonth;
   box.innerHTML =
@@ -376,23 +411,27 @@ function saveCalc(patch: Partial<CalcCfg>) {
   clearTimeout(calcTimer);
   calcTimer = window.setTimeout(() => setMeta('calc', S.calc), 400);
 }
-for (const id of ['c-gas', 'hc-gas']) $(id).addEventListener('input', (e) => saveCalc({ gas: (e.target as HTMLInputElement).value }));
-for (const id of ['c-eth', 'hc-eth']) $(id).addEventListener('input', (e) => saveCalc({ eth: (e.target as HTMLInputElement).value }));
+for (const id of ['c-gas']) $(id).addEventListener('input', (e) => saveCalc({ gas: (e.target as HTMLInputElement).value }));
+for (const id of ['c-eth']) $(id).addEventListener('input', (e) => saveCalc({ eth: (e.target as HTMLInputElement).value }));
 $('c-ratio').addEventListener('input', (e) => saveCalc({ ratio: Number((e.target as HTMLInputElement).value) }));
 
 /* ---------- navegação ---------- */
-const TAB_OF: Record<string, string> = { inicio: 'inicio', hist: 'hist', manut: 'manut', mais: 'mais', indicadores: 'mais', etanol: 'mais' };
+const TAB_OF: Record<string, string> = { inicio: 'inicio', hist: 'hist', manut: 'manut', mais: 'mais', indicadores: 'mais', etanol: 'mais', locais: 'mais' };
+let tab = 'inicio';
 function show(next: string) {
   view = next;
+  // Postos abre a partir do Início ou do Mais: a aba de origem continua marcada
+  tab = TAB_OF[next] ?? tab;
   document.querySelectorAll<HTMLElement>('main > .view').forEach((s) => (s.hidden = s.id !== 'v-' + next));
-  document.querySelectorAll<HTMLElement>('.tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.view === TAB_OF[next])));
-  $('add-btn').hidden = !(next === 'inicio' || next === 'hist');
+  document.querySelectorAll<HTMLElement>('.tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.view === tab)));
   window.scrollTo(0, 0);
 }
 document.querySelectorAll<HTMLElement>('.tab').forEach((t) => t.addEventListener('click', () => show(t.dataset.view!)));
 document.addEventListener('click', (e) => {
   const el = (e.target as HTMLElement).closest<HTMLElement>('[data-go],[data-sheet],#mais-cars');
   if (!el) return;
+  if (el.dataset.go === 'postos') return postos.open(undefined, tab);
+  if (el.dataset.go === 'locais') return postos.openLocais();
   if (el.dataset.go) return show(el.dataset.go);
   if (el.dataset.sheet === 'set') return openSettings();
   if (el.id === 'mais-cars') return openCars();
@@ -426,6 +465,8 @@ document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('cli
 
 /* ---------- abastecimento ---------- */
 let editing: FuelLog | null = null;
+/** Posto escolhido em "Abastecer aqui" (CNPJ e nome), gravado junto se o nome não for trocado. */
+let fillStation: { id: string; name: string } | null = null;
 let delArmed = false;
 let recent: string[] = [];
 const FIELD_OF = { total: 'fld-total', liters: 'fld-liters', price: 'fld-price' } as const;
@@ -438,6 +479,7 @@ function openFill(id: string | null) {
     return;
   }
   editing = id ? S.logs.find((f) => f.id === id) ?? null : null;
+  fillStation = editing?.station_id && editing.station ? { id: editing.station_id, name: editing.station } : null;
   delArmed = false;
   const del = $('f-del');
   del.hidden = !editing;
@@ -473,6 +515,19 @@ function openFill(id: string | null) {
   if (!editing) setTimeout(() => $('f-total').focus({ preventScroll: true }), 260);
 }
 $('add-btn').addEventListener('click', () => openFill(null));
+
+function openFillAt(s: Station, fuel: Fuel, price: number | null) {
+  openFill(null);
+  if (!current()) return;
+  fillStation = { id: s.c, name: s.n };
+  $<HTMLInputElement>('f-station').value = s.n;
+  if (current()!.fuel_type === 'flex') $<HTMLInputElement>(fuel === 'etanol' ? 'f-fuel-e' : 'f-fuel-g').checked = true;
+  if (price) {
+    $<HTMLInputElement>('f-price').value = fmt(price, Math.round(price * 1000) % 10 ? 3 : 2);
+    recent = ['price'];
+  }
+  updateFillHints();
+}
 
 function updateFillHints() {
   const v = current();
@@ -580,6 +635,7 @@ $('fill-sheet').addEventListener('submit', async (e) => {
     full_tank: $<HTMLInputElement>('f-full').checked,
     range_left_km: Number.isFinite(rng) ? rng : null,
     station: val('f-station').trim().slice(0, 80) || null,
+    station_id: fillStation && val('f-station').trim() === fillStation.name ? fillStation.id : null,
     note: val('f-note').trim().slice(0, 140) || null,
   });
   const wasEdit = !!editing;

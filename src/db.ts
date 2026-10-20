@@ -35,6 +35,8 @@ export interface FuelLog extends SyncFields {
   range_left_km: number | null;
   station: string | null;
   note: string | null;
+  /** CNPJ do posto (cadastro da ANP), quando escolhido na aba Postos. */
+  station_id?: string | null;
 }
 
 export interface Service extends SyncFields {
