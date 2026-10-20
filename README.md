@@ -62,6 +62,7 @@ npm run build    # gera dist/ com o service worker
 3. Foto do manual para confirmar o plano de manutenção do Creta.
 4. Notas do Google nos postos (falta o segredo `GOOGLE_MAPS_API_KEY`).
 5. Fase 4: pesquisa do plano do fabricante e APK.
+6. Casa e trabalho: o texto da busca de um passa para o outro (bug); trocar o botão Buscar por sugestões enquanto digita (Places Autocomplete do Google, com espera curta entre teclas e token de sessão para não gastar cota).
 
 ## Licença
 
