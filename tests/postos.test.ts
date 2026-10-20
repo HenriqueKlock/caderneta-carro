@@ -131,3 +131,15 @@ test('Google: casa pelo endereço, pelo nome ou pela bandeira; não confunde ban
   assert.equal(m.get('B')?.id, 'g2');
   assert.equal(m.get('C')?.id, 'g4');
 });
+
+test('rota: posto com endereço numa rua do caminho entra mesmo com o ponto impreciso', async () => {
+  const { onRoads } = await import('../src/postos.ts');
+  assert.equal(onRoads('Rodovia Jose Carlos Daux SC-401, 7467', ['Rodovia José Carlos Daux']), true);
+  assert.equal(onRoads('Rodovia SC-401, 4290', ['SC-401']), true);
+  assert.equal(onRoads('Rua Lauro Linhares, 10', ['Rodovia José Carlos Daux', 'SC-401']), false);
+  const path = [{ lat: base.lat, lon: base.lon }, { lat: base.lat + 10 / 110.57, lon: base.lon }];
+  const naRua = { ...st('rua', at(5, 1.5), { gc: [6.5, '2026-10-08'] }), e: 'Rodovia Jose Carlos Daux, 7467', pg: 'b' as const };
+  const longe = { ...st('longe', at(5, 4), { gc: [6.5, '2026-10-08'] }), e: 'Rodovia Jose Carlos Daux, 9999', pg: 'b' as const };
+  const rows = stationsFor([naRua, longe], { kind: 'rota', path, detourKm: 0.5, roads: ['Rodovia José Carlos Daux'] }, car, [], today);
+  assert.deepEqual(rows.map((r) => [r.s.c, r.extraKm]), [['rua', 0]]);
+});

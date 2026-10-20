@@ -94,11 +94,19 @@ export async function reverse(p: LatLon): Promise<FoundPlace> {
   }
 }
 
-export interface Route { pts: [number, number][]; km: number; min: number; from: [number, number]; to: [number, number] }
+export interface Route {
+  pts: [number, number][];
+  km: number;
+  min: number;
+  from: [number, number];
+  to: [number, number];
+  /** Nomes e siglas das ruas do caminho (ex.: "Rodovia José Carlos Daux", "SC-401"). */
+  roads?: string[];
+}
 
 /** Rota de carro entre dois pontos, simplificada para poucos pontos (fica guardada na conta). */
 export async function route(a: LatLon, b: LatLon): Promise<Route> {
-  const url = OSRM + `${a.lon.toFixed(5)},${a.lat.toFixed(5)};${b.lon.toFixed(5)},${b.lat.toFixed(5)}?overview=full&geometries=geojson&alternatives=false&steps=false`;
+  const url = OSRM + `${a.lon.toFixed(5)},${a.lat.toFixed(5)};${b.lon.toFixed(5)},${b.lat.toFixed(5)}?overview=full&geometries=geojson&alternatives=false&steps=true`;
   let data: any;
   try {
     data = await getJSON(url);
@@ -109,7 +117,14 @@ export async function route(a: LatLon, b: LatLon): Promise<Route> {
   if (!r) throw new Error('Não achei um caminho de carro entre os dois endereços.');
   const path = (r.geometry.coordinates as [number, number][]).map(([lon, lat]) => ({ lat, lon }));
   const pts = simplify(path, 0.03).map((p) => [Math.round(p.lat * 1e5) / 1e5, Math.round(p.lon * 1e5) / 1e5] as [number, number]);
-  return { pts, km: Math.round(r.distance / 100) / 10, min: Math.round(r.duration / 60), from: [a.lat, a.lon], to: [b.lat, b.lon] };
+  const roads = new Set<string>();
+  for (const leg of r.legs ?? []) {
+    for (const st of leg.steps ?? []) {
+      if (st.distance < 150) continue; // trechos curtos (rotatórias, acessos) não contam
+      for (const n of [st.name, ...(String(st.ref ?? '').split(';'))]) if (n && n.trim()) roads.add(n.trim());
+    }
+  }
+  return { pts, km: Math.round(r.distance / 100) / 10, min: Math.round(r.duration / 60), from: [a.lat, a.lon], to: [b.lat, b.lon], roads: [...roads].slice(0, 80) };
 }
 
 /* ---------- arquivo público de postos (gerado toda semana a partir da ANP) ---------- */

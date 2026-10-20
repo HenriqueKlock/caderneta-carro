@@ -27,6 +27,10 @@ interface Ctx {
   fillAt: (s: Station, fuel: Fuel, price: number | null) => void;
   /** Postos que você usa (com CNPJ), do mais frequente para o menos, com o rendimento dos tanques. */
   usage: () => StationUse[];
+  /** Abastecimentos do carro atual sem posto anotado. */
+  unlinked: () => number;
+  /** Liga esses abastecimentos a um posto; devolve quantos mudaram. */
+  linkFills: (s: Station) => Promise<number>;
 }
 
 /**
@@ -107,7 +111,7 @@ export function initPostos(ctx: Ctx) {
     const r = pl.rota;
     if (!r || r.deleted_at) return null;
     const d = r.data as Partial<Route & { on: boolean; detour_m: number }>;
-    return { pts: d.pts ?? [], km: d.km ?? 0, min: d.min ?? 0, from: d.from ?? [0, 0], to: d.to ?? [0, 0], on: !!d.on, detour_m: d.detour_m ?? 1000 };
+    return { pts: d.pts ?? [], km: d.km ?? 0, min: d.min ?? 0, from: d.from ?? [0, 0], to: d.to ?? [0, 0], roads: d.roads, on: !!d.on, detour_m: d.detour_m ?? 1000 };
   }
   function place(kind: 'casa' | 'trabalho', pl: Places = ctx.places()) {
     const p = pl[kind];
@@ -132,7 +136,7 @@ export function initPostos(ctx: Ctx) {
     const r = rota();
     if (!r || !r.on || r.pts.length < 2) return { need: 'rota', where: 'No caminho casa → trabalho' };
     const path = r.pts.map(([lat, lon]) => ({ lat, lon }));
-    return { base: { kind: 'rota', path, detourKm: r.detour_m / 1000 }, where: 'No caminho casa → trabalho · ' + fmt(r.km, 1) + ' km', center: path[Math.floor(path.length / 2)] };
+    return { base: { kind: 'rota', path, detourKm: r.detour_m / 1000, roads: r.roads }, where: 'No caminho casa → trabalho · ' + fmt(r.km, 1) + ' km', center: path[Math.floor(path.length / 2)] };
   }
 
   function compute(b: Base): { rows: StationRow[]; rec: Recommendation } {
@@ -162,6 +166,7 @@ export function initPostos(ctx: Ctx) {
 
   /* ---------- aba Postos ---------- */
   async function open(kind?: BaseKind, origin?: string) {
+    if (rota()?.on && !rota()?.roads) refreshRoute(); // caminhos salvos antes de guardarmos os nomes das ruas
     from = origin ?? (document.querySelector('.tab[aria-selected="true"]') as HTMLElement | null)?.dataset.view ?? 'inicio';
     $('p-back-label').textContent = from === 'mais' ? 'Mais' : 'Início';
     if (kind) base = kind;
@@ -354,7 +359,13 @@ export function initPostos(ctx: Ctx) {
     if (rs.base.kind === 'ponto') fetchGoogle(rs.center, radius);
     else {
       const path = rs.base.path;
-      for (const p of [path[0], path[Math.floor(path.length / 2)], path[path.length - 1]]) fetchGoogle(p, 3);
+      // um ponto a cada ~7 km do caminho, raio de 4 km (o Google devolve no máximo 20 postos por busca)
+      let acc = 0;
+      fetchGoogle(path[0], 4);
+      for (let i = 1; i < path.length; i++) {
+        acc += haversineKm(path[i - 1], path[i]);
+        if (acc >= 7 || i === path.length - 1) { fetchGoogle(path[i], 4); acc = 0; }
+      }
     }
     const sorted = sortRows(rows);
     const limit = showAll ? sorted.length : 20;
@@ -458,6 +469,10 @@ export function initPostos(ctx: Ctx) {
         const v = u ? usageVerdict(u) : null;
         return v ? '<span class="hint ' + v.tone + '">' + esc(v.text) + (u!.kml ? ' Média daqui: ' + fmt(u!.kml, 2) + ' km/l.' : '') + '</span>' : '';
       })() +
+      (() => {
+        const n = ctx.unlinked();
+        return n ? '<button type="button" class="btn sm" id="posto-mine" data-armed="0">É aqui que eu abasteço</button><span class="hint">Liga a este posto ' + (n === 1 ? 'o seu abastecimento' : 'os seus ' + n + ' abastecimentos') + ' sem posto anotado; o último preço que você pagou passa a valer para ele.</span>' : '';
+      })() +
       (mine.length ? '<ul class="ev-list">' + mine.slice(0, 5).map((f) => '<li><span class="d">' + dm(f.date) + '/' + f.date.slice(2, 4) + '</span><span>' + FUEL[f.fuel as Fuel] + ' · ' + brl(f.price_per_l) + '/l · ' + brl(f.total_brl) + '</span></li>').join('') + '</ul>' : '<span class="hint">Nenhum ainda. Abastecendo por aqui, o preço que você pagar passa a valer como o dado mais recente deste posto.</span>') + '</div>';
     ctx.openSheet('posto-sheet');
   }
@@ -474,6 +489,19 @@ export function initPostos(ctx: Ctx) {
     if (shown?.c === s.c && $('posto-sheet').classList.contains('open')) openPosto(s.c);
     render();
   }
+  $('posto-body').addEventListener('click', async (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('#posto-mine');
+    if (!b || !shown) return;
+    if (b.dataset.armed !== '1') {
+      b.dataset.armed = '1';
+      b.textContent = 'Confirmar: ligar ' + ctx.unlinked() + ' abastecimento(s)';
+      b.classList.add('primary');
+      return;
+    }
+    const n = await ctx.linkFills(shown);
+    ctx.toast(n + (n === 1 ? ' abastecimento ligado a ' : ' abastecimentos ligados a ') + nm(shown));
+    setTimeout(() => shown && openPosto(shown.c), 300);
+  });
   $('posto-route').addEventListener('click', () => {
     if (!shown) return;
     window.open(mapsUrl(shown, gmatch.get(shown.c)), '_blank', 'noopener');
@@ -608,7 +636,7 @@ export function initPostos(ctx: Ctx) {
     const pl = await getPlaces();
     const c = place('casa', pl), t = place('trabalho', pl), r = rota(pl);
     if (!c || !t || !r?.on) return renderLocais();
-    const same = r.pts.length > 1 && r.from[0] === c.lat && r.from[1] === c.lon && r.to[0] === t.lat && r.to[1] === t.lon;
+    const same = r.pts.length > 1 && !!r.roads && r.from[0] === c.lat && r.from[1] === c.lon && r.to[0] === t.lat && r.to[1] === t.lon;
     if (same && !force) return renderLocais();
     routeMsg = 'Calculando o caminho…';
     renderLocais();

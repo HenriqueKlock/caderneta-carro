@@ -104,6 +104,12 @@ const postos = initPostos({
   places: () => S.places,
   fillAt: (s, fuel, price) => openFillAt(s, fuel, price),
   usage: () => stationUsage(carLogs(), intervals(carLogs()), todayISO()),
+  unlinked: () => carLogs().filter((f) => !f.station_id && !f.station).length,
+  linkFills: async (st) => {
+    const rows = carLogs().filter((f) => !f.station_id && !f.station);
+    await db.fuel_logs.bulkPut(rows.map((f) => stamp<FuelLog>({ ...f, station_id: st.c, station: stationLabel(st) })));
+    return rows.length;
+  },
 });
 
 liveQuery(async () => {

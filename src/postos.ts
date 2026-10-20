@@ -39,6 +39,27 @@ export function haversineKm(a: LatLon, b: LatLon): number {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+/** Até onde um posto com endereço numa rua do caminho ainda conta como "no caminho" (o ponto pode estar errado). */
+export const ON_ROAD_KM = 2.5;
+
+function plain(s: string) {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+/** O endereço do posto está numa das ruas do caminho? Compara o nome da rua (sem número) e siglas como SC-401. */
+export function onRoads(endereco: string, roads?: string[]): boolean {
+  if (!roads?.length) return false;
+  const street = endereco.replace(/,\s*[^,]*$/, '');
+  const st = plain(street);
+  if (st.length < 6) return false;
+  const refs = (street.match(/\b(SC|BR)[\s-]?\d{3}\b/gi) ?? []).map(plain);
+  return roads.some((r) => {
+    const rp = plain(r);
+    if (rp.length < 5) return false;
+    if (/^(SC|BR)\d{3}$/.test(rp)) return refs.includes(rp);
+    return st.includes(rp) || rp.includes(st);
+  });
+}
+
 /** Fator de ruas: a distância em linha reta subestima o trajeto de carro. */
 export const ROAD = 1.3;
 
@@ -167,7 +188,7 @@ export function ageDays(date: string, today: string) {
 /* ---------- recomendação ---------- */
 export type Base =
   | { kind: 'ponto'; at: LatLon; radiusKm: number }
-  | { kind: 'rota'; path: LatLon[]; detourKm: number };
+  | { kind: 'rota'; path: LatLon[]; detourKm: number; roads?: string[] };
 
 export interface CarModel {
   kmlG: number; // km/l na gasolina
@@ -222,9 +243,14 @@ export function stationsFor(
       extraKm = 2 * d;
     } else {
       const d = distToPathKm(p, base.path) * ROAD;
-      if (d > base.detourKm) continue;
-      distKm = d;
-      extraKm = 2 * d;
+      if (d <= base.detourKm) {
+        distKm = d;
+        extraKm = 2 * d;
+      } else if (d <= ON_ROAD_KM && onRoads(s.e, base.roads)) {
+        // Endereço numa rua do caminho (rodovias longas costumam ter o ponto do endereço impreciso)
+        distKm = 0;
+        extraKm = 0;
+      } else continue;
     }
     const rel = reliability(s, today, google?.get(s.c));
     const gas = priceOf(s, 'gasolina', own);
