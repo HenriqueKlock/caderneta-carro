@@ -14,6 +14,22 @@ function cors(origin: string | null) {
   };
 }
 
+/** Exige um usuário logado de verdade. O gateway aceita a chave publicável como se fosse login (papel anon). */
+async function currentUser(req: Request): Promise<string | null> {
+  const url = Deno.env.get('SUPABASE_URL');
+  const auth = req.headers.get('authorization') ?? '';
+  const apikey = req.headers.get('apikey') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+  if (!url || !/^Bearer eyJ/.test(auth)) return null;
+  try {
+    const r = await fetch(url + '/auth/v1/user', { headers: { apikey, Authorization: auth } });
+    if (!r.ok) return null;
+    const u = await r.json();
+    return typeof u?.id === 'string' ? u.id : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Cota diária por usuário (tabela api_usage). Sem confirmação da cota, não chama o serviço pago. */
 async function withinQuota(req: Request, fn: string, max: number): Promise<boolean> {
   const url = Deno.env.get('SUPABASE_URL');
@@ -38,6 +54,8 @@ Deno.serve(async (req) => {
   const json = (status: number, data: unknown) =>
     new Response(JSON.stringify(data), { status, headers: { ...headers, 'Content-Type': 'application/json' } });
   if (req.method !== 'POST') return json(405, { error: 'Use POST.' });
+
+  if (!(await currentUser(req))) return json(401, { error: 'Entre na sua conta para usar esta função.' });
 
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
   if (!apiKey) return json(503, { error: 'A leitura de OS ainda não está configurada (falta a chave da API do Claude).' });
