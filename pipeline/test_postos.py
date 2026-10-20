@@ -49,8 +49,34 @@ class Unidades(unittest.TestCase):
         self.assertEqual(postos.clean_street('ROD SC 401 KM 5'), 'RODOVIA SC-401 KM 5')
         self.assertEqual(postos.clean_street('R  JOAO   PINTO'), 'RUA JOAO PINTO')
 
+    def test_bairro(self):
+        self.assertEqual(postos.clean_bairro('RIB DA ILHA'), 'RIBEIRAO DA ILHA')
+        self.assertTrue(postos.same_name('Ribeirão da Ilha', 'RIBEIRAO DA ILHA'))
+        self.assertTrue(postos.same_name('Trindade', 'TRINDADE'))
+        self.assertFalse(postos.same_name('Florianópolis', 'RIBEIRAO DA ILHA'))
+        self.assertEqual(postos.display_flag('BANDEIRA BRANCA'), 'Bandeira branca')
+
     def test_titulo(self):
         self.assertEqual(postos.title('POSTO DA LAGOA LTDA'), 'Posto da Lagoa LTDA')
+
+
+class Geocodificacao(unittest.TestCase):
+    def geo(self, respostas):
+        g = postos.Geo({}, 99)
+        g._q = lambda params: respostas.pop(0) if respostas else []
+        return g
+
+    def test_bairro_que_volta_a_cidade_e_recusado(self):
+        cidade = {'lat': '-27.59', 'lon': '-48.55', 'addresstype': 'city', 'name': 'Florianópolis', 'boundingbox': ['-27.6', '-27.58', '-48.56', '-48.54'],
+                  'address': {'city': 'Florianópolis', 'state': 'Santa Catarina'}}
+        p = {'uf': 'SC', 'mun': 'FLORIANOPOLIS', 'end': 'RUA X', 'num': '10', 'bairro': 'RIB DA ILHA'}
+        self.assertIsNone(self.geo([[], [], [cidade]]).locate(p))
+
+    def test_numero_na_cidade_certa(self):
+        outra = {'lat': '-26.9', 'lon': '-48.6', 'boundingbox': ['0', '0.001', '0', '0.001'], 'address': {'town': 'Itapema', 'state': 'Santa Catarina'}}
+        certa = {'lat': '-27.5912345', 'lon': '-48.5', 'boundingbox': ['0', '0.001', '0', '0.001'], 'address': {'city': 'Florianópolis', 'state': 'Santa Catarina'}}
+        p = {'uf': 'SC', 'mun': 'FLORIANOPOLIS', 'end': 'RUA X', 'num': '10', 'bairro': ''}
+        self.assertEqual(self.geo([[outra, certa]]).locate(p), (-27.59123, -48.5, 'n', 'Florianópolis'))
 
 
 class Fluxo(unittest.TestCase):

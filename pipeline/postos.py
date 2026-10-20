@@ -46,6 +46,7 @@ UF_NOME = {
 # Geocodifica primeiro onde o app é mais usado; o resto do estado entra nas rodadas seguintes
 PRIORIDADE = {'FLORIANOPOLIS', 'SAOJOSE', 'PALHOCA', 'BIGUACU', 'SANTOAMARODAIMPERATRIZ', 'GOVERNADORCELSORAMOS', 'ANTONIOCARLOS'}
 FISC_ANOS = 5
+GEO_V = 2
 LPC_SEMANAS = 6
 
 
@@ -366,7 +367,7 @@ def clean_street(s: str) -> str:
 
 
 SUFIXOS = r'\s+(LTDA\.?|EIRELI|ME|EPP|S\.?/?A\.?|EM RECUPERACAO JUDICIAL)$'
-BANDEIRAS = {'RAIZEN': 'Shell', 'VIBRA': 'Petrobras', 'PETROBRASDISTRIBUIDORASA': 'Petrobras', 'BRANCA': 'Bandeira branca', 'IPIRANGA': 'Ipiranga', 'ALESAT': 'Ale'}
+BANDEIRAS = {'BANDEIRABRANCA': 'Bandeira branca', 'RAIZEN': 'Shell', 'VIBRA': 'Petrobras', 'PETROBRASDISTRIBUIDORASA': 'Petrobras', 'BRANCA': 'Bandeira branca', 'IPIRANGA': 'Ipiranga', 'ALESAT': 'Ale'}
 
 
 def display_name(p: dict) -> str:
@@ -383,6 +384,31 @@ def display_flag(s: str) -> str:
         if k.startswith(key):
             return val
     return title(s)[:30]
+
+
+BAIRRO_ABREV = [(r'\bRIB\.?\b', 'RIBEIRAO'), (r'\bSTO\.?\b', 'SANTO'), (r'\bSTA\.?\b', 'SANTA'), (r'\bJD\.?\b', 'JARDIM'),
+                (r'\bVL\.?\b', 'VILA'), (r'\bPQ\.?\b', 'PARQUE'), (r'\bCONJ\.?\b', 'CONJUNTO'), (r'\bRES\.?\b', 'RESIDENCIAL'),
+                (r'\bN\.? ?S(RA)?\.?\b', 'NOSSA SENHORA'), (r'\bS\.? ?JOAO\b', 'SAO JOAO'), (r'\bLOT\.?\b', 'LOTEAMENTO')]
+BAIRRO_TIPOS = {'suburb', 'neighbourhood', 'quarter', 'city_district', 'hamlet', 'village', 'residential', 'locality', 'borough', 'isolated_dwelling', 'town'}
+
+
+def clean_bairro(s: str) -> str:
+    s = re.sub(r'\s+', ' ', str(s or '').upper()).strip(' ,.-')
+    if norm(s) in {'', 'CENTRO', 'ZONARURAL', 'INTERIOR', 'RURAL', 'SN', 'NAOINFORMADO'}:
+        return '' if norm(s) != 'CENTRO' else 'CENTRO'
+    for pat, rep in BAIRRO_ABREV:
+        s = re.sub(pat, rep, s)
+    return s
+
+
+def same_name(a: str, b: str) -> bool:
+    x, y = norm(a), norm(b)
+    if not x or not y:
+        return False
+    if x in y or y in x:
+        return True
+    wa = [w for w in re.findall(r'[A-Z]{4,}', unicodedata.normalize('NFKD', a).encode('ascii', 'ignore').decode().upper()) if w not in {'BAIRRO', 'JARDIM', 'VILA', 'PARQUE'}]
+    return bool(wa) and wa[0] in y
 
 
 def addr_key(p: dict) -> str:
@@ -444,9 +470,9 @@ class Geo:
             tries.append(('n', {**base, 'street': f'{num} {title(street)}'}))
         if street:
             tries.append(('r', {**base, 'street': title(street)}))
-        if p.get('bairro'):
-            tries.append(('b', {'q': f"{title(p['bairro'])}, {title(mun)}, {UF_NOME.get(uf, uf)}, Brasil"}))
-        loose = None
+        bairro = clean_bairro(p.get('bairro', ''))
+        if bairro:
+            tries.append(('b', {'q': f"{title(bairro)}, {title(mun)}, {UF_NOME.get(uf, uf)}, Brasil"}))
         for prec, params in tries:
             for res in self._q(params):
                 if not self._same_city(res, mun, uf):
@@ -455,12 +481,14 @@ class Geo:
                 lat, lon = round(float(res['lat']), 5), round(float(res['lon']), 5)
                 # Rua comprida (rodovia, avenida que cruza a cidade): o centro dela não serve como endereço
                 if prec in ('n', 'r') and res.get('category', res.get('class')) == 'highway' and size > 1.5:
-                    loose = loose or (lat, lon, 'b')
                     break
-                if prec == 'b' and size > 6:
-                    break
-                return lat, lon, prec
-        return loose
+                # Bairro: só vale se o resultado for mesmo o bairro (não a cidade inteira nem outro lugar)
+                if prec == 'b' and (size > 6 or res.get('addresstype') not in BAIRRO_TIPOS or not same_name(res.get('name', ''), bairro)):
+                    continue
+                a = res.get('address') or {}
+                city = next((a[k] for k in ('city', 'town', 'village', 'municipality') if a.get(k)), None)
+                return lat, lon, prec, city
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -571,7 +599,12 @@ def main():
 
     def need(p):
         g = geo_cache.get(p['cnpj'])
-        return not g or g.get('k') != addr_key(p) or (g.get('p') is None and g.get('em', '') < retry_before)
+        if not g or g.get('k') != addr_key(p):
+            return True
+        # v2: bairro só aceito se o resultado for o próprio bairro; rodovia comprida não vale mais como ponto
+        if g.get('v') != GEO_V and g.get('p') in ('b', None):
+            return True
+        return g.get('p') is None and g.get('em', '') < retry_before
 
     todo = [p for p in cad.values() if need(p)]
     todo.sort(key=lambda p: (p['cnpj'] not in prices, norm(p['mun']) not in PRIORIDADE, p['mun'], p['cnpj']))
@@ -580,7 +613,7 @@ def main():
     try:
         for p in todo:
             r = geo.locate(p)
-            geo_cache[p['cnpj']] = {'k': addr_key(p), 'em': today.isoformat(), **({'la': r[0], 'lo': r[1], 'p': r[2]} if r else {'p': None})}
+            geo_cache[p['cnpj']] = {'k': addr_key(p), 'em': today.isoformat(), 'v': GEO_V, **({'la': r[0], 'lo': r[1], 'p': r[2], 'mn': r[3]} if r else {'p': None})}
             done += 1
             if done % 100 == 0:
                 log(f'  {done} processados, {geo.calls} consultas')
@@ -599,7 +632,7 @@ def main():
         endereco = title(clean_street(p['end'])) + (', ' + num if num else '')
         item = {
             'c': cnpj, 'n': display_name(p), 'b': display_flag(p['bandeira']), 'e': endereco[:90],
-            'br': title(p['bairro'])[:40], 'm': title(p['mun']), 'la': g['la'], 'lo': g['lo'], 'pg': g['p'],
+            'br': title(p['bairro'])[:40], 'm': g.get('mn') if norm(g.get('mn')) == norm(p['mun']) else title(p['mun']), 'la': g['la'], 'lo': g['lo'], 'pg': g['p'],
         }
         if cnpj in prices:
             item['pr'] = prices[cnpj]
