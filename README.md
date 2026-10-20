@@ -23,7 +23,7 @@ A chave pública do Supabase pode aparecer no código: ela só acessa o que as r
 npm install
 npm run dev      # servidor local
 npm run check    # TypeScript
-npm test         # cálculos de consumo com dados reais
+npm test         # cálculos de consumo (dados fictícios)
 npm run build    # gera dist/ com o service worker
 ```
 
