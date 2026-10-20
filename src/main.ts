@@ -518,7 +518,9 @@ $('c-ratio').addEventListener('input', (e) => saveCalc({ ratio: Number((e.target
 
 /* ---------- ajustes e backup ---------- */
 async function renderSettings() {
-  const [v, f, s, i] = await Promise.all([db.vehicles.count(), db.fuel_logs.count(), db.services.count(), db.service_items.count()]);
+  // Excluídos continuam na base como marcação (deleted_at) até a sincronização; não entram na contagem
+  const live = (t: any) => t.filter((r: { deleted_at: string | null }) => !r.deleted_at).count();
+  const [v, f, s, i] = await Promise.all([live(db.vehicles), live(db.fuel_logs), live(db.services), live(db.service_items)]);
   $('count-d').textContent = pl(v, 'carro', 'carros') + ' · ' + pl(f, 'abastecimento', 'abastecimentos') + ' · ' + pl(s, 'manutenção', 'manutenções') + ' (' + pl(i, 'item', 'itens') + ')';
   $('ver-d').textContent = 'Build ' + __BUILD__;
   let persisted = false;
