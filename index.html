@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Caderneta do Carro</title>
+  <meta name="description" content="Abastecimentos, consumo e manutenção do carro, funcionando sem internet.">
+  <meta name="theme-color" content="#14202B">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+</head>
+<body>
+<header class="cluster">
+  <div class="cluster-in">
+    <div class="cl-top">
+      <div class="cl-left">
+        <span class="brand">Caderneta do Carro</span>
+        <span class="sync" id="sync"><i></i><span>Salvo neste aparelho</span></span>
+      </div>
+      <div class="cl-right">
+        <button class="pill-btn" id="car-btn" type="button" aria-label="Trocar de carro"><span id="car-name">Sem carro</span><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg></button>
+        <button class="icon-btn" id="set-btn" type="button" aria-label="Ajustes e backup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+      </div>
+    </div>
+    <div class="odo-row">
+      <div style="display:flex;align-items:flex-end"><div class="odo" id="odo" aria-label="Odômetro"></div><span class="odo-unit">km</span></div>
+      <div class="last" id="last-fill"></div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <section id="v-painel" class="view stack">
+      <div class="card hero">
+        <span class="sec-label">Consumo médio</span>
+        <div class="hero-val"><strong class="num" id="h-avg">–</strong><span>km/l</span></div>
+        <div class="hero-sub" id="h-sub"></div>
+      </div>
+      <div class="kpis" id="kpis"></div>
+      <div class="card" id="card-kml">
+        <div class="chart-head"><span class="sec-label">km/l por tanque</span><span class="legend"><span><i style="background:var(--gas)"></i>Gasolina</span><span><i style="background:var(--eth)"></i>Etanol</span><span><i class="dash"></i><span id="avg-legend">média</span></span></span></div>
+        <div id="chart-kml"></div>
+      </div>
+      <div class="card" id="card-price">
+        <div class="chart-head"><span class="sec-label">Preço pago por litro</span><span class="note num" id="price-range"></span></div>
+        <div id="chart-price"></div>
+      </div>
+      <p class="note">Consumo calculado de tanque cheio a tanque cheio: km rodados entre dois enchimentos ÷ litros colocados desde o anterior.</p>
+    </section>
+
+    <section id="v-hist" class="view stack-sm" hidden>
+      <div class="chart-head" style="margin:0"><span class="sec-label">Abastecimentos</span><span class="note" id="hist-count"></span></div>
+      <div class="list" id="hist"></div>
+      <p class="note">Toque num registro para editar ou excluir.</p>
+    </section>
+
+    <section id="v-calc" class="view stack" hidden>
+      <div class="card stack-sm" style="gap:6px">
+        <span class="sec-label">Álcool só compensa abaixo de</span>
+        <div class="threshold"><strong class="num" id="c-thr">–</strong><span class="note" id="c-thr-sub"></span></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label for="c-gas">Gasolina R$/l</label><input class="inp" id="c-gas" inputmode="decimal" placeholder="6,99"></div>
+        <div class="field"><label for="c-eth">Etanol R$/l</label><input class="inp" id="c-eth" inputmode="decimal" placeholder="4,79"></div>
+      </div>
+      <div class="field">
+        <label for="c-ratio">Rendimento do etanol vs. gasolina neste carro</label>
+        <div class="range-row"><input type="range" id="c-ratio" min="0.6" max="0.8" step="0.01" value="0.7"><output id="c-ratio-out" class="num">70%</output></div>
+        <span class="hint" id="c-ratio-hint"></span>
+      </div>
+      <div class="verdict" id="c-verdict"></div>
+    </section>
+  </div>
+</main>
+
+<nav class="bar" aria-label="Seções">
+  <div class="bar-in" role="tablist">
+    <button class="tab" role="tab" data-view="painel" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 15a8 8 0 1 1 16 0"/><path d="M12 15l4-5"/><circle cx="12" cy="15" r="1.3" fill="currentColor"/></svg>Painel</button>
+    <button class="tab" role="tab" data-view="hist" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 6h14M5 12h14M5 18h9"/></svg>Histórico</button>
+    <button class="pump" id="add-btn" type="button" aria-label="Novo abastecimento"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button class="tab" role="tab" data-view="calc" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3c3 4 6 7.5 6 11a6 6 0 0 1-12 0c0-3.5 3-7 6-11z"/><path d="M9.5 15.5a2.5 2.5 0 0 0 2.5 2"/></svg>Álcool×Gas</button>
+  </div>
+</nav>
+
+<div class="scrim" id="scrim"></div>
+
+<!-- Abastecimento -->
+<form class="sheet" id="fill-sheet" novalidate aria-labelledby="fill-title">
+  <div class="sheet-in">
+    <div class="grab"></div>
+    <h2 id="fill-title">Novo abastecimento</h2>
+    <div class="seg" role="radiogroup" aria-label="Combustível" id="f-fuel-seg">
+      <input type="radio" name="fuel" id="f-fuel-g" value="gasolina" checked><label for="f-fuel-g">Gasolina</label>
+      <input type="radio" name="fuel" id="f-fuel-e" value="etanol"><label for="f-fuel-e">Etanol</label>
+    </div>
+    <div class="grid2">
+      <div class="field"><label for="f-total">Valor total R$</label><input class="inp" id="f-total" inputmode="decimal" autocomplete="off" placeholder="275,13"></div>
+      <div class="field"><label for="f-liters">Litros</label><input class="inp" id="f-liters" inputmode="decimal" autocomplete="off" placeholder="39,36"></div>
+      <div class="field"><label for="f-price">Preço R$/l</label><input class="inp" id="f-price" inputmode="decimal" autocomplete="off" placeholder="6,99"></div>
+      <div class="field"><label for="f-odo">Odômetro km</label><input class="inp" id="f-odo" inputmode="numeric" autocomplete="off"></div>
+      <div class="field"><label for="f-range">Autonomia restante</label><input class="inp" id="f-range" inputmode="numeric" autocomplete="off" placeholder="km (opcional)"></div>
+      <div class="field"><label for="f-date">Data</label><input class="inp" id="f-date" type="date"></div>
+    </div>
+    <span class="hint" id="f-hint"></span>
+    <label class="check"><input type="checkbox" id="f-full" checked> Enchi o tanque</label>
+    <div class="grid2">
+      <div class="field"><label for="f-station">Posto</label><input class="inp sm" id="f-station" autocomplete="off" placeholder="Opcional"></div>
+      <div class="field"><label for="f-note">Observação</label><input class="inp sm" id="f-note" autocomplete="off" placeholder="Viagem, aditivada…"></div>
+    </div>
+    <div class="err" id="f-err" hidden></div>
+    <div class="actions">
+      <button type="button" class="btn danger" id="f-del" hidden>Excluir</button>
+      <button type="button" class="btn" data-close>Cancelar</button>
+      <button type="submit" class="btn primary">Salvar</button>
+    </div>
+  </div>
+</form>
+
+<!-- Carros -->
+<div class="sheet" id="car-sheet" role="dialog" aria-labelledby="car-title">
+  <div class="sheet-in">
+    <div class="grab"></div>
+    <h2 id="car-title">Carros</h2>
+    <div class="car-list" id="car-list"></div>
+    <div class="actions">
+      <button type="button" class="btn" data-close>Fechar</button>
+      <button type="button" class="btn primary" id="car-add">Cadastrar carro</button>
+    </div>
+  </div>
+</div>
+
+<!-- Cadastro/edição de carro -->
+<form class="sheet" id="vehicle-sheet" novalidate aria-labelledby="vehicle-title">
+  <div class="sheet-in">
+    <div class="grab"></div>
+    <h2 id="vehicle-title">Cadastrar carro</h2>
+    <div class="grid2">
+      <div class="field full"><label for="v-name">Apelido</label><input class="inp sm" id="v-name" autocomplete="off" placeholder="Creta"></div>
+      <div class="field"><label for="v-make">Marca</label><input class="inp sm" id="v-make" autocomplete="off" placeholder="Hyundai"></div>
+      <div class="field"><label for="v-model">Modelo</label><input class="inp sm" id="v-model" autocomplete="off" placeholder="Creta Prestige"></div>
+      <div class="field"><label for="v-year">Ano</label><input class="inp sm" id="v-year" inputmode="numeric" autocomplete="off" placeholder="2020"></div>
+      <div class="field"><label for="v-engine">Motor</label><input class="inp sm" id="v-engine" autocomplete="off" placeholder="2.0 16V AT"></div>
+      <div class="field"><label for="v-fuel">Combustível</label>
+        <select class="inp sm" id="v-fuel"><option value="flex">Flex</option><option value="gasolina">Gasolina</option><option value="etanol">Etanol</option><option value="diesel">Diesel</option></select></div>
+      <div class="field"><label for="v-km">Km atual</label><input class="inp sm" id="v-km" inputmode="numeric" autocomplete="off" placeholder="Opcional"></div>
+    </div>
+    <div class="err" id="v-err" hidden></div>
+    <div class="actions">
+      <button type="button" class="btn danger" id="v-archive" hidden>Arquivar</button>
+      <button type="button" class="btn" data-close>Cancelar</button>
+      <button type="submit" class="btn primary">Salvar</button>
+    </div>
+  </div>
+</form>
+
+<!-- Ajustes -->
+<div class="sheet" id="set-sheet" role="dialog" aria-labelledby="set-title">
+  <div class="sheet-in">
+    <div class="grab"></div>
+    <h2 id="set-title">Ajustes</h2>
+    <h3>Backup</h3>
+    <div class="set-list">
+      <div class="set-row"><div><div class="t">Exportar backup</div><div class="d">Arquivo JSON com todos os carros e registros</div></div><button type="button" class="link-btn" id="exp-btn">Exportar</button></div>
+      <div class="set-row"><div><div class="t">Importar backup</div><div class="d">Junta com o que já existe; não apaga nada</div></div><button type="button" class="link-btn" id="imp-btn">Importar</button></div>
+    </div>
+    <input type="file" id="imp-file" accept="application/json,.json" hidden>
+    <h3>Este aparelho</h3>
+    <div class="set-list">
+      <div class="set-row"><div><div class="t">Armazenamento protegido</div><div class="d" id="persist-d">Verificando…</div></div></div>
+      <div class="set-row"><div><div class="t">Registros guardados</div><div class="d" id="count-d"></div></div></div>
+      <div class="set-row"><div><div class="t">Versão</div><div class="d" id="ver-d"></div></div></div>
+    </div>
+    <div class="actions"><button type="button" class="btn" data-close>Fechar</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

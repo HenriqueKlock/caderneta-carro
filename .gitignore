@@ -1,0 +1,8 @@
+node_modules/
+dist/
+# Dados pessoais nunca entram no repositório
+*.backup.json
+caderneta-carro-backup-*.json
+data/
+.env
+.env.*
