@@ -130,3 +130,15 @@ export function maintenanceTotals(vehicleId: string, services: SvcLike[], items:
   }
   return { parts, labor, total: parts + labor, visits: ok.size };
 }
+
+/** Quanto do intervalo já foi usado (0 a 1), pelo km ou pelo tempo, o que estiver mais adiantado. */
+export function progressOf(s: ItemState, currentKm: number, today: string): number | null {
+  const parts: number[] = [];
+  if (s.due_km != null && s.last_km != null && s.due_km > s.last_km) parts.push((currentKm - s.last_km) / (s.due_km - s.last_km));
+  if (s.due_date && s.last_date) {
+    const total = daysDiff(s.last_date, s.due_date);
+    if (total > 0) parts.push(daysDiff(s.last_date, today) / total);
+  }
+  if (!parts.length) return null;
+  return Math.min(1, Math.max(0, Math.max(...parts)));
+}

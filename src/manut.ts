@@ -1,7 +1,8 @@
 import { db, softDelete, stamp, uuid, type FuelLog, type PendingFile, type Service, type ServiceItem, type Vehicle } from './db';
 import { kmPerDay } from './calc';
 import { PLANS, planByKey } from './plans';
-import { dueByKm, itemStates, lastDoneByKey, maintenanceTotals, sortStates, type ItemState } from './maintenance';
+import { dueByKm, itemStates, lastDoneByKey, maintenanceTotals, progressOf, sortStates, type ItemState } from './maintenance';
+import { ICON } from './icons';
 import { attachmentUrl, currentSession, parseOS, type OsDraft } from './sync';
 
 export interface MaintCtx {
@@ -47,68 +48,72 @@ export function initMaintenance(c: MaintCtx) {
 
   /* ---------- markup ---------- */
   $('v-manut').innerHTML = `
-    <div class="actions">
-      <button type="button" class="btn primary" id="m-import">Importar OS</button>
-      <button type="button" class="btn" id="m-new">Lançar manutenção</button>
+    <div class="page-head"><h1>Manutenção</h1><span class="muted" id="m-car"></span></div>
+    <div id="m-alert"></div>
+    <div class="btn-row">
+      <button type="button" class="btn primary" id="m-import">${ICON.doc}Importar OS</button>
+      <button type="button" class="btn" id="m-new">Lançar à mão</button>
     </div>
     <input type="file" id="m-file" accept="application/pdf,image/*" hidden>
-    <div id="m-pending" class="stack-sm"></div>
-    <div class="card stack-sm">
-      <div class="chart-head" style="margin:0"><span class="sec-label">Próximas manutenções</span><span class="note" id="m-plan-name"></span></div>
-      <div id="m-next" class="m-list"></div>
-      <p class="note" id="m-plan-note"></p>
+    <div id="m-pending" class="list-card" hidden></div>
+    <div class="list-card" id="m-plan-card">
+      <div id="m-next"></div>
+      <button type="button" class="list-more" id="m-more" hidden></button>
     </div>
-    <div class="card stack-sm">
-      <span class="sec-label">Quando chegar em</span>
-      <div class="range-row"><input class="inp" id="m-target" inputmode="numeric" style="max-width:150px"><span class="note" id="m-target-when"></span></div>
-      <div id="m-due" class="stack-sm"></div>
+    <p class="foot-note" id="m-plan-note"></p>
+    <div class="card" id="m-target-card">
+      <div class="card-head"><span>Quando chegar em</span><span class="hint" id="m-target-when"></span></div>
+      <div class="suffix" style="max-width:200px"><input class="inp sm" id="m-target" inputmode="numeric" aria-label="Quilometragem alvo"><em>km</em></div>
+      <div id="m-due" class="hint" style="color:var(--ink-2);font-size:14px"></div>
     </div>
-    <div class="kpis" id="m-kpis"></div>
-    <div class="stack-sm">
-      <div class="chart-head" style="margin:0"><span class="sec-label">Idas à oficina</span><span class="note" id="m-hist-count"></span></div>
-      <div class="list" id="m-hist"></div>
-    </div>`;
+    <div class="stat-grid" id="m-kpis"></div>
+    <div class="sec-head"><span>Idas à oficina</span><span class="muted" style="font-size:13px" id="m-hist-count"></span></div>
+    <div class="list-card" id="m-hist"></div>`;
 
   document.body.insertAdjacentHTML(
     'beforeend',
-    `<form class="sheet" id="svc-sheet" novalidate aria-labelledby="svc-title">
-      <div class="sheet-in">
-        <div class="grab"></div>
+    `<form class="sheet full" id="svc-sheet" novalidate aria-labelledby="svc-title">
+      <div class="sheet-bar">
+        <button type="button" class="text-btn" data-close style="justify-self:start">Cancelar</button>
         <h2 id="svc-title">Lançar manutenção</h2>
+        <button type="button" class="text-btn danger" id="svc-del" hidden>Excluir</button>
+      </div>
+      <div class="sheet-body"><div class="stack">
+        <div class="good" id="svc-check" hidden></div>
         <div class="warn-box" id="svc-warn" hidden></div>
         <div class="grid2">
-          <div class="field"><label for="svc-date">Data</label><input class="inp sm" id="svc-date" type="date"></div>
-          <div class="field"><label for="svc-km">Km na oficina</label><input class="inp sm" id="svc-km" inputmode="numeric" autocomplete="off"></div>
-          <div class="field full"><label for="svc-shop">Oficina</label><input class="inp sm" id="svc-shop" autocomplete="off"></div>
-          <div class="field"><label for="svc-os">Nº da OS</label><input class="inp sm" id="svc-os" autocomplete="off" placeholder="Opcional"></div>
-          <div class="field"><label for="svc-type">Tipo</label><select class="inp sm" id="svc-type"><option value="revisao">Revisão</option><option value="corretiva">Conserto</option><option value="pneus">Pneus</option><option value="outros">Outros</option></select></div>
+          <label class="field">Data<input class="inp sm" id="svc-date" type="date"></label>
+          <label class="field">Km na oficina<input class="inp sm" id="svc-km" inputmode="numeric" autocomplete="off"></label>
+          <label class="field full">Oficina<input class="inp sm" id="svc-shop" autocomplete="off"></label>
+          <label class="field">Nº da OS<input class="inp sm" id="svc-os" autocomplete="off" placeholder="Opcional"></label>
+          <label class="field">Tipo<select class="inp sm" id="svc-type"><option value="revisao">Revisão</option><option value="corretiva">Conserto</option><option value="pneus">Pneus</option><option value="outros">Outros</option></select></label>
         </div>
-        <h3>Itens</h3>
-        <div id="svc-items" class="stack-sm"></div>
-        <button type="button" class="btn ghost" id="svc-add-item" style="align-self:flex-start">+ Adicionar item</button>
-        <div class="svc-total num" id="svc-total"></div>
-        <div class="field"><label for="svc-note">Observação</label><input class="inp sm" id="svc-note" autocomplete="off" placeholder="Opcional"></div>
-        <div class="set-row"><div><div class="t">Anexo da OS</div><div class="d" id="svc-att-d"></div></div><div class="cl-right"><button type="button" class="link-btn" id="svc-att-view" hidden>Ver</button><button type="button" class="link-btn" id="svc-att-add">Anexar</button></div></div>
+        <div class="card-head"><span>Itens</span><span class="svc-total" id="svc-total"></span></div>
+        <div id="svc-items" class="view" style="gap:10px"></div>
+        <button type="button" class="btn" id="svc-add-item">+ Adicionar item</button>
+        <label class="field">Observação<input class="inp sm" id="svc-note" autocomplete="off" placeholder="Opcional"></label>
+        <div class="list-card"><div class="set-row"><div><div class="t">Anexo da OS</div><div class="d" id="svc-att-d"></div></div><div><button type="button" class="link-btn" id="svc-att-view" hidden>Ver</button><button type="button" class="link-btn" id="svc-att-add">Anexar</button></div></div></div>
         <input type="file" id="svc-att-file" accept="application/pdf,image/*" hidden>
         <div class="err" id="svc-err" hidden></div>
-        <div class="actions">
-          <button type="button" class="btn danger" id="svc-del" hidden>Excluir</button>
-          <button type="button" class="btn" data-close>Cancelar</button>
-          <button type="submit" class="btn primary">Salvar</button>
-        </div>
-      </div>
+      </div></div>
+      <div class="sheet-foot"><button type="submit" class="btn primary block">Salvar manutenção</button></div>
     </form>
     <datalist id="plan-list"></datalist>`,
   );
   document.querySelectorAll('#svc-sheet [data-close]').forEach((b) => b.addEventListener('click', c.closeSheets));
 
   /* ---------- render ---------- */
+  let expanded = false;
+  const SHOW_FIRST = 5;
+
   function render(d: MaintData) {
     data = d;
     const v = d.vehicle;
-    const view = $('v-manut');
+    $('m-car').textContent = v ? v.name + ' · ' + km(currentKmOf(v, d.logs, d.services)) + ' km' : '';
     if (!v) {
       $('m-next').innerHTML = '<div class="empty">Cadastre um carro para ver o plano de manutenção.</div>';
+      ['m-alert', 'm-plan-note', 'm-kpis', 'm-hist'].forEach((id) => ($(id).innerHTML = ''));
+      $('m-target-card').hidden = true;
       return;
     }
     const plan = planByKey(v.plan_key);
@@ -118,49 +123,58 @@ export function initMaintenance(c: MaintCtx) {
     const svcs = d.services.filter((s) => s.vehicle_id === v.id && !s.deleted_at).sort((a, b) => b.date.localeCompare(a.date));
     const itemsOf = (sid: string) => d.items.filter((i) => i.service_id === sid && !i.deleted_at);
 
-    // Pendências de leitura
+    // OS aguardando leitura
     const pend = d.pending.filter((p) => p.vehicle_id === v.id && p.status === 'aguardando_leitura');
+    $('m-pending').hidden = !pend.length;
     $('m-pending').innerHTML = pend
       .map(
         (p) =>
-          '<div class="set-row"><div><div class="t">OS aguardando leitura</div><div class="d">' + esc(p.name) + ' · ' + dmy(p.created_at.slice(0, 10)) + '</div></div><div class="cl-right"><button type="button" class="link-btn" data-read="' + esc(p.id) + '">Ler agora</button><button type="button" class="link-btn muted" data-discard="' + esc(p.id) + '">Descartar</button></div></div>',
+          '<div class="set-row"><div><div class="t">OS aguardando leitura</div><div class="d">' + esc(p.name) + ' · ' + dmy(p.created_at.slice(0, 10)) + '</div></div><div><button type="button" class="link-btn" data-read="' + esc(p.id) + '">Ler agora</button><button type="button" class="link-btn muted" data-discard="' + esc(p.id) + '">Descartar</button></div></div>',
       )
       .join('');
 
-    // Próximas
     if (!plan) {
-      $('m-plan-name').textContent = '';
+      $('m-alert').innerHTML = '';
       $('m-next').innerHTML =
-        '<div class="stack-sm"><p class="note">Este carro ainda não tem plano de manutenção.</p><div class="range-row"><select class="inp sm" id="m-plan-pick">' +
+        '<div class="set-row col"><div><div class="t">Este carro ainda não tem plano de manutenção</div><div class="d">Escolha um plano para o app calcular as próximas trocas.</div></div><div class="btn-row"><select class="inp sm" id="m-plan-pick" aria-label="Plano">' +
         PLANS.map((p) => '<option value="' + esc(p.key) + '">' + esc(p.name) + '</option>').join('') +
-        '</select><button type="button" class="btn" id="m-plan-use" style="flex:0 0 auto">Usar</button></div></div>';
+        '</select><button type="button" class="btn primary" id="m-plan-use">Usar este plano</button></div></div>';
+      $('m-more').hidden = true;
       $('m-plan-note').textContent = 'Para outros carros, a pesquisa de plano chega na próxima fase.';
-      $('m-due').innerHTML = '';
-      $('m-target-when').textContent = '';
+      $('m-target-card').hidden = true;
     } else {
-      $('m-plan-name').textContent = plan.name;
-      const last = lastDoneByKey(v.id, d.services, d.items);
-      const states = sortStates(itemStates(plan, last, curKm, today, kpd));
-      $('m-next').innerHTML = states.map((s) => nextRow(s)).join('');
+      const states = sortStates(itemStates(plan, lastDoneByKey(v.id, d.services, d.items), curKm, today, kpd));
+      // Aviso no topo: o mais urgente que pede ação
+      const venc = states.find((s) => s.status === 'vencida');
+      const semHist = states.find((s) => s.status === 'sem_historico' && (s.item.interval_km || s.item.interval_months));
+      const every = (it: ItemState['item']) => [it.interval_km ? km(it.interval_km) + ' km' : '', it.interval_months ? it.interval_months + ' meses' : ''].filter(Boolean).join(' ou ');
+      $('m-alert').innerHTML = venc
+        ? '<div class="alert bad">' + ICON.warn + '<div><b>' + esc(venc.item.description) + ' vencida</b><span>' + esc(dueText(venc)) + '. Agende a troca.</span></div></div>'
+        : semHist
+          ? '<div class="alert">' + ICON.warn + '<div><b>' + esc(semHist.item.description) + ' sem registro</b><span>O plano pede ' + (semHist.item.action === 'inspecionar' ? 'inspeção' : 'troca') + ' a cada ' + esc(every(semHist.item)) + '. Pergunte na próxima revisão.</span></div></div>'
+          : '';
+      const shown = expanded ? states : states.slice(0, SHOW_FIRST);
+      $('m-next').innerHTML = shown.map((s) => planRow(s, curKm, today)).join('');
+      $('m-more').hidden = states.length <= SHOW_FIRST;
+      $('m-more').textContent = expanded ? 'Mostrar menos' : 'Ver o plano completo (' + states.length + ' itens)';
       $('m-plan-note').innerHTML =
-        esc(plan.summary) + ' Fontes: ' + plan.sources.map((s) => '<a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.label) + '</a>').join(' · ');
-      // Seletor de km
+        esc(plan.name) + '. ' + esc(plan.summary) + ' Fontes: ' + plan.sources.map((x) => '<a href="' + esc(x.url) + '" target="_blank" rel="noopener">' + esc(x.label) + '</a>').join(' · ');
+      // Quando chegar em X km
+      $('m-target-card').hidden = false;
       const tEl = $<HTMLInputElement>('m-target');
       const def = Math.ceil((curKm + 1) / 10000) * 10000;
       const tgt = targetKm && targetKm > curKm ? targetKm : def;
       if (document.activeElement !== tEl) tEl.value = String(tgt);
       const r = dueByKm(states, tgt, curKm, today, kpd);
-      $('m-target-when').textContent = r.targetDate ? 'km · ≈ ' + monthYear(r.targetDate) + ' no seu ritmo' : 'km';
-      const group = (title: string, list: ItemState[]) =>
-        list.length ? '<div><div class="sub-label">' + title + '</div><div class="note">' + list.map((s) => esc(s.item.description)).join(', ') + '</div></div>' : '';
-      $('m-due').innerHTML =
-        group('Trocar', r.due.filter((s) => s.item.action === 'trocar')) +
-        group('Inspecionar', r.due.filter((s) => s.item.action === 'inspecionar')) +
-        group('Verificar (sem histórico no app)', r.check) ||
-        '<p class="note">Nada do plano vence até ' + km(tgt) + ' km.</p>';
+      $('m-target-when').textContent = r.targetDate ? '≈ ' + monthYear(r.targetDate) + ' no seu ritmo' : '';
+      const names = (list: ItemState[]) => list.map((x) => x.item.description.toLowerCase()).join(', ');
+      const trocar = r.due.filter((x) => x.item.action === 'trocar');
+      const insp = r.due.filter((x) => x.item.action === 'inspecionar');
+      const lines = [trocar.length ? 'Trocar ' + names(trocar) : '', insp.length ? 'Inspecionar ' + names(insp) : '', r.check.length ? 'Verificar (sem registro): ' + names(r.check) : ''].filter(Boolean);
+      $('m-due').innerHTML = lines.length ? lines.map((l) => '<div>' + esc(l.charAt(0).toUpperCase() + l.slice(1)) + '</div>').join('') : 'Nada do plano vence até ' + km(tgt) + ' km.';
     }
 
-    // Indicadores
+    // Indicadores de manutenção
     const since = new Date(today + 'T12:00:00Z');
     since.setUTCFullYear(since.getUTCFullYear() - 1);
     const t12 = maintenanceTotals(v.id, d.services, d.items, since.toISOString().slice(0, 10));
@@ -168,10 +182,10 @@ export function initMaintenance(c: MaintCtx) {
       ['Gasto em 12 meses', brl(t12.total), pl(t12.visits, 'ida à oficina', 'idas à oficina')],
       ['Peças × mão de obra', brl(t12.parts), 'mão de obra ' + brl(t12.labor)],
     ]
-      .map((k) => '<div class="kpi"><span class="k">' + k[0] + '</span><span class="v num">' + k[1] + '</span><span class="s">' + k[2] + '</span></div>')
+      .map((k) => '<div class="stat"><span class="k">' + k[0] + '</span><span class="v">' + k[1] + '</span><span class="s">' + k[2] + '</span></div>')
       .join('');
 
-    // Histórico
+    // Idas à oficina
     $('m-hist-count').textContent = pl(svcs.length, 'registro', 'registros');
     $('m-hist').innerHTML = svcs.length
       ? svcs
@@ -179,38 +193,48 @@ export function initMaintenance(c: MaintCtx) {
             const its = itemsOf(s.id);
             const tot = its.reduce((a, i) => a + i.parts_brl + i.labor_brl, 0);
             const hasAtt = !!s.attachment_path || d.pending.some((p) => p.service_id === s.id);
-            const sub = [s.odometer_km ? km(s.odometer_km) + ' km' : '', pl(its.length, 'item', 'itens'), hasAtt ? 'OS anexada' : ''].filter(Boolean).join(' · ');
+            const sub = [dmy(s.date), s.odometer_km ? km(s.odometer_km) + ' km' : '', pl(its.length, 'item', 'itens')].filter(Boolean).join(' · ');
             return (
-              '<button type="button" class="row" data-svc="' + esc(s.id) + '"><span class="r-date num">' + s.date.slice(8, 10) + '/' + s.date.slice(5, 7) + '<small>' + monthYear(s.date) + '</small></span>' +
-              '<span class="r-mid"><span class="a">' + esc(s.shop || TYPE_LABEL[s.type]) + '</span><span class="b num">' + esc(sub) + '</span></span>' +
-              '<span class="r-end"><span class="kml num">' + brl(tot) + '</span><span class="pill misto">' + TYPE_LABEL[s.type] + '</span></span></button>'
+              '<button type="button" class="row" data-svc="' + esc(s.id) + '"><span class="ic svc">' + ICON.wrench + '</span>' +
+              '<span class="mid"><span class="a">' + esc(TYPE_LABEL[s.type] + (s.shop ? ' · ' + s.shop : '')) + '</span><span class="b">' + esc(sub) + '</span></span>' +
+              '<span class="end"><span class="a">' + brl(tot) + '</span><span class="b' + (hasAtt ? ' blue' : '') + '">' + (hasAtt ? 'OS anexada' : TYPE_LABEL[s.type]) + '</span></span></button>'
             );
           })
           .join('')
       : '<div class="empty">Nenhuma manutenção registrada.</div>';
-    view.dataset.ready = '1';
 
-    // datalist com os itens do plano
     $('plan-list').innerHTML = (plan?.items ?? []).map((i) => '<option value="' + esc(i.description) + '"></option>').join('');
   }
 
-  function nextRow(s: ItemState): string {
+  function dueText(s: ItemState): string {
+    const parts: string[] = [];
+    if (s.due_km != null) parts.push((s.remaining_km! <= 0 ? 'venceu em ' : '') + km(s.due_km) + ' km');
+    if (s.due_date) parts.push((s.remaining_days! <= 0 ? 'venceu em ' : 'até ') + monthYear(s.due_date));
+    if (s.status !== 'vencida' && s.est_date && s.due_km != null) parts.push('≈ ' + monthYear(s.est_date));
+    return parts.join(' · ');
+  }
+
+  function planRow(s: ItemState, curKm: number, today: string): string {
     const it = s.item;
-    const every = [it.interval_km ? 'a cada ' + km(it.interval_km) + ' km' : '', it.interval_months ? (it.interval_km ? 'ou ' : 'a cada ') + it.interval_months + ' meses' : ''].filter(Boolean).join(' ');
-    let line: string;
-    if (s.status === 'sem_historico') line = 'Sem registro no app' + (every ? ' · ' + every : it.note ? ' · ' + it.note : '');
-    else if (s.status === 'sem_intervalo') line = 'Feito em ' + dmy(s.last_date!) + (it.note ? ' · ' + it.note : '');
-    else {
-      const parts: string[] = [];
-      if (s.due_km != null) parts.push((s.remaining_km! <= 0 ? 'venceu em ' : 'em ') + km(s.due_km) + ' km');
-      if (s.due_date) parts.push((s.remaining_days! <= 0 ? 'venceu em ' : 'até ') + monthYear(s.due_date));
-      if (s.status !== 'vencida' && s.est_date && s.due_km != null) parts.push('≈ ' + monthYear(s.est_date));
-      line = parts.join(' · ');
+    let left: string;
+    let right = '';
+    if (s.status === 'sem_historico') {
+      left = 'Sem registro no app';
+      right = it.interval_km || it.interval_months ? 'a cada ' + [it.interval_km ? km(it.interval_km) + ' km' : '', it.interval_months ? it.interval_months + ' meses' : ''].filter(Boolean).join(' ou ') : it.note ?? '';
+    } else if (s.status === 'sem_intervalo') {
+      left = 'Feito em ' + dmy(s.last_date!);
+      right = it.note ?? '';
+    } else {
+      if (s.remaining_km != null) left = s.remaining_km > 0 ? (it.action === 'inspecionar' ? 'Inspeção em ' : 'Faltam ') + km(s.remaining_km) + ' km' : 'Passou ' + km(-s.remaining_km) + ' km';
+      else left = s.remaining_days != null && s.remaining_days > 0 ? 'Troca por tempo' : 'Venceu pelo tempo';
+      right = dueText(s);
     }
-    const lastTxt = s.last_date && s.status !== 'sem_intervalo' ? '<span class="b">Última: ' + dmy(s.last_date) + (s.last_km ? ' · ' + km(s.last_km) + ' km' : '') + '</span>' : '';
+    const pct = progressOf(s, curKm, today);
+    const tags = (it.action === 'inspecionar' ? '<span class="tag">inspeção</span>' : '') + (it.preliminary ? '<span class="tag">a confirmar</span>' : '');
     return (
-      '<div class="m-row"><div class="r-mid"><span class="a">' + esc(it.description) + (it.action === 'inspecionar' ? ' <small class="tag">inspecionar</small>' : '') + (it.preliminary ? ' <small class="tag">a confirmar</small>' : '') + '</span>' +
-      '<span class="b num">' + esc(line) + '</span>' + lastTxt + '</div><span class="chip-st ' + s.status + '">' + STATUS_LABEL[s.status] + '</span></div>'
+      '<div class="plan-row"><div class="h"><span class="n">' + esc(it.description) + tags + '</span><span class="chip ' + s.status + '">' + STATUS_LABEL[s.status] + '</span></div>' +
+      (pct != null ? '<div class="bar ' + s.status + '"><i style="width:' + Math.round(pct * 100) + '%"></i></div>' : '') +
+      '<div class="row-meta"><span>' + esc(left) + '</span><span>' + esc(right) + '</span></div></div>'
     );
   }
 
@@ -220,6 +244,10 @@ export function initMaintenance(c: MaintCtx) {
     const btn = el.closest<HTMLElement>('button');
     if (!btn) return;
     if (btn.id === 'm-new') return openService(null);
+    if (btn.id === 'm-more') {
+      expanded = !expanded;
+      return render(data);
+    }
     if (btn.id === 'm-import') {
       if (!data.vehicle) return toast('Cadastre o carro primeiro.');
       return $<HTMLInputElement>('m-file').click();
@@ -259,7 +287,7 @@ export function initMaintenance(c: MaintCtx) {
     const online = navigator.onLine !== false && !!(await currentSession());
     if (!online) {
       await savePending(file, file.name);
-      return toast(navigator.onLine === false ? 'Sem internet: a OS fica guardada e você lê depois.' : 'Entre na conta (engrenagem) para ler a OS. Ela ficou guardada.');
+      return toast(navigator.onLine === false ? 'Sem internet: a OS fica guardada e você lê depois.' : 'Entre na conta (Mais › Conta) para ler a OS. Ela ficou guardada.');
     }
     await readFile(file, file.name, null);
   });
@@ -274,7 +302,7 @@ export function initMaintenance(c: MaintCtx) {
   async function readFile(blob: Blob, name: string, pendingId: string | null) {
     if (reading) return;
     if (navigator.onLine === false) return toast('Sem internet. Tente quando estiver conectado.');
-    if (!(await currentSession())) return toast('Entre na conta (engrenagem) para ler a OS.');
+    if (!(await currentSession())) return toast('Entre na conta (Mais › Conta) para ler a OS.');
     const v = data.vehicle!;
     const plan = planByKey(v.plan_key);
     reading = true;
@@ -305,11 +333,11 @@ export function initMaintenance(c: MaintCtx) {
     const money = (n: number) => (n ? c.fmt(n, 2) : '');
     return (
       '<div class="item-row" data-id="' + esc(it.id) + '">' +
-      '<div class="range-row"><input class="inp sm" data-f="description" list="plan-list" placeholder="Descrição (ex.: Óleo 5W30)" value="' + esc(it.description) + '" aria-label="Descrição">' +
+      '<div class="r1"><input class="inp sm" data-f="description" list="plan-list" placeholder="Descrição (ex.: Óleo 5W30)" value="' + esc(it.description) + '" aria-label="Descrição">' +
       '<button type="button" class="link-btn muted" data-rm aria-label="Remover item">Remover</button></div>' +
       '<select class="inp sm" data-f="plan" aria-label="Item do plano">' + opts + '</select>' +
-      '<div class="grid2"><div class="field"><label>Peça R$</label><input class="inp sm" data-f="parts" inputmode="decimal" value="' + money(it.parts_brl) + '"></div>' +
-      '<div class="field"><label>Mão de obra R$</label><input class="inp sm" data-f="labor" inputmode="decimal" value="' + money(it.labor_brl) + '"></div></div></div>'
+      '<div class="grid2"><label class="field">Peça R$<input class="inp sm" data-f="parts" inputmode="decimal" value="' + money(it.parts_brl) + '"></label>' +
+      '<label class="field">Mão de obra R$<input class="inp sm" data-f="labor" inputmode="decimal" value="' + money(it.labor_brl) + '"></label></div></div>'
     );
   }
 
@@ -326,7 +354,7 @@ export function initMaintenance(c: MaintCtx) {
     const its = readItems();
     const p = its.reduce((s, i) => s + i.parts_brl, 0);
     const l = its.reduce((s, i) => s + i.labor_brl, 0);
-    $('svc-total').innerHTML = 'Total <b>' + brl(p + l) + '</b> · peças ' + brl(p) + ' · mão de obra ' + brl(l);
+    $('svc-total').innerHTML = '<b>' + brl(p + l) + '</b> · peças ' + brl(p) + ' · m.o. ' + brl(l);
   }
 
   function renderAttach() {
@@ -370,12 +398,19 @@ export function initMaintenance(c: MaintCtx) {
         : [{ id: uuid(), description: '', plan_item_key: null, parts_brl: 0, labor_brl: 0 }];
     $('svc-items').innerHTML = rows.map(itemRow).join('');
     const warn = $('svc-warn');
+    const check = $('svc-check');
+    check.hidden = true;
     if (draft) {
       const dt = draft.document_totals.total_brl;
-      warn.innerHTML =
-        '<b>Lido da OS. Confira antes de salvar.</b>' +
-        (dt != null ? '<div>Total impresso na OS: ' + brl(dt) + '</div>' : '') +
-        (draft.warnings.length ? '<ul>' + draft.warnings.map((w) => '<li>' + esc(w) + '</li>').join('') + '</ul>' : '');
+      const sum = draft.totals.total_brl;
+      if (dt != null && Math.abs(dt - sum) <= 0.01) {
+        check.innerHTML = ICON.check + '<span>Soma dos itens <b>' + brl(sum) + '</b> = total da OS</span>';
+        check.hidden = false;
+      }
+      const n = draft.warnings.length;
+      warn.innerHTML = n
+        ? '<b>' + (n === 1 ? '1 ponto para conferir' : n + ' pontos para conferir') + '</b><ul>' + draft.warnings.map((w) => '<li>' + esc(w) + '</li>').join('') + '</ul>'
+        : '<b>Lido da OS. Confira os itens antes de salvar.</b>';
       warn.hidden = false;
     } else warn.hidden = true;
     updateTotal();
@@ -506,5 +541,5 @@ export function initMaintenance(c: MaintCtx) {
     toast(editing ? 'Manutenção atualizada' : 'Manutenção salva');
   });
 
-  return { render };
+  return { render, openService: (id: string) => openService(id) };
 }

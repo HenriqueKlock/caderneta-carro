@@ -66,3 +66,11 @@ test('totais separam peças e mão de obra por carro', () => {
   assert.equal(t.visits, 2);
   assert.equal(maintenanceTotals('v', services, items, '2025-01-01').total, 700);
 });
+
+test('progresso pelo km ou pelo tempo', async () => {
+  const { progressOf } = await import('../src/maintenance.ts');
+  const last = lastDoneByKey('v', services, items);
+  const st = itemStates(plan, last, 52000, '2025-07-10', 40).find((s) => s.item.key === 'oleo_motor')!;
+  // km: 2.000 de 10.000 = 20%; tempo: 181 de 365 dias ≈ 50% → vale o maior
+  assert.equal(Math.round(progressOf(st, 52000, '2025-07-10')! * 100), 50);
+});

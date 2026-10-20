@@ -2,6 +2,7 @@ import { createClient, type Session } from '@supabase/supabase-js';
 import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from './config';
 import { db, getMeta, now, setMeta } from './db';
 import { loginEmailError } from './auth-errors';
+import { DEFAULT_HOME, isIndicatorId, type IndicatorId } from './indicators';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   // Login pelo link do e-mail: o Supabase devolve a sessão no fragmento (#access_token=…) da URL do app
@@ -132,6 +133,7 @@ export async function sync(): Promise<void> {
     await uploadAttachments(session.user.id);
     for (const t of TABLES) await push(t);
     for (const t of TABLES) await pull(t);
+    await syncSettings();
     if (!owner) await setMeta('owner_user_id', session.user.id);
     const at = new Date().toISOString();
     await setMeta('last_sync_at', at);
@@ -272,3 +274,37 @@ export async function parseOS(
   return (data as { draft: OsDraft }).draft;
 }
 
+
+/* ---------- preferências do usuário (indicadores do Início) ---------- */
+
+export interface HomePrefs { ids: IndicatorId[]; updated_at: string; dirty: boolean }
+const PREFS_KEY = 'home_indicators';
+
+export async function getHomePrefs(): Promise<HomePrefs> {
+  return getMeta<HomePrefs>(PREFS_KEY, { ids: [...DEFAULT_HOME], updated_at: '1970-01-01T00:00:00.000Z', dirty: false });
+}
+
+/** Grava a escolha no aparelho e agenda o envio para a conta. */
+export async function setHomePrefs(ids: IndicatorId[]) {
+  await setMeta(PREFS_KEY, { ids: ids.filter(isIndicatorId), updated_at: now(), dirty: true });
+  scheduleSync(800);
+}
+
+async function syncSettings() {
+  const local = await getHomePrefs();
+  if (local.dirty) {
+    const { error } = await supabase.from('user_settings').upsert({ home_indicators: local.ids, updated_at: local.updated_at }, { onConflict: 'user_id' });
+    if (error) throw error;
+    const cur = await getHomePrefs();
+    if (cur.updated_at === local.updated_at) await setMeta(PREFS_KEY, { ...cur, dirty: false });
+  }
+  const { data, error } = await supabase.from('user_settings').select('home_indicators, updated_at').maybeSingle();
+  if (error) throw error;
+  if (!data) return;
+  const remoteAt = new Date(data.updated_at).toISOString();
+  const cur = await getHomePrefs();
+  if (!cur.dirty && remoteAt > cur.updated_at) {
+    const ids = (Array.isArray(data.home_indicators) ? data.home_indicators : []).filter(isIndicatorId);
+    await setMeta(PREFS_KEY, { ids, updated_at: remoteAt, dirty: false });
+  }
+}
