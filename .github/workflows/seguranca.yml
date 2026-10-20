@@ -1,0 +1,34 @@
+name: Segurança (caixa preta)
+
+# Roda o teste de caixa preta e guarda o relatório na branch `seguranca` (para conferência fora do GitHub).
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 9 * * 1'
+
+permissions:
+  contents: write
+
+jobs:
+  caixa-preta:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Teste
+        run: |
+          set -o pipefail
+          node tests/blackbox.mjs 2>&1 | tee relatorio.txt
+      - name: Guardar relatório
+        if: ${{ always() }}
+        run: |
+          mkdir -p /tmp/rel && cp relatorio.txt /tmp/rel/ 2>/dev/null || echo "sem relatório" > /tmp/rel/relatorio.txt
+          git fetch origin seguranca || true
+          git checkout --orphan seguranca-tmp
+          git rm -rfq . && git clean -fdq
+          cp /tmp/rel/relatorio.txt .
+          git add relatorio.txt
+          git -c user.name="caderneta-bot" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -qm "Relatório de segurança $(date -u +%FT%TZ)"
+          git push -f origin HEAD:seguranca
