@@ -1,14 +1,15 @@
 // Edge Function: dados do Google Places para o app (só usuários logados, verify_jwt).
 //  - mode "nearby":  postos perto de um ponto, com nota, número de avaliações e endereço;
 //  - mode "posto":   procura um posto específico pelo endereço (quando o "nearby" não achou);
-//  - mode "address": busca de endereço para cadastrar casa e trabalho.
+//  - mode "address": busca de endereço para cadastrar casa e trabalho;
+//  - mode "photo":   link temporário de uma foto do posto (sem expor a chave).
 // A chave fica no segredo GOOGLE_MAPS_API_KEY; sem ela, devolve { configured: false }.
 // Nada é guardado no servidor e nenhuma localização vai para o log.
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 
 const ALLOWED_ORIGINS = ['https://henriqueklock.github.io', 'http://localhost:5173', 'http://localhost:4173'];
 const PLACES = 'https://places.googleapis.com/v1/places:';
-const STATION_FIELDS = 'places.id,places.displayName,places.location,places.rating,places.userRatingCount,places.formattedAddress';
+const STATION_FIELDS = 'places.id,places.displayName,places.location,places.rating,places.userRatingCount,places.formattedAddress,places.photos';
 const ADDRESS_FIELDS = 'places.id,places.displayName,places.location,places.formattedAddress,places.addressComponents,places.types';
 
 function cors(origin: string | null) {
@@ -54,7 +55,7 @@ async function withinQuota(req: Request, fn: string, max: number): Promise<boole
   }
 }
 
-const LIMITS: Record<string, number> = { nearby: 40, posto: 20, address: 30 };
+const LIMITS: Record<string, number> = { nearby: 40, posto: 20, address: 30, photo: 30 };
 
 const inBrazil = (lat: number, lon: number) => lat >= -34 && lat <= 6 && lon >= -74 && lon <= -34;
 
@@ -67,6 +68,9 @@ function station(p: any) {
     lon: p.location?.longitude,
     rating: typeof p.rating === 'number' ? p.rating : null,
     count: p.userRatingCount ?? 0,
+    photo: p.photos?.[0]
+      ? { name: p.photos[0].name, author: p.photos[0].authorAttributions?.[0]?.displayName ?? '', authorUri: p.photos[0].authorAttributions?.[0]?.uri ?? '' }
+      : null,
   };
 }
 
@@ -107,6 +111,19 @@ Deno.serve(async (req) => {
   const mode = b.mode ?? 'nearby';
   const lat = Number(b.lat), lon = Number(b.lon);
   const hasPoint = Number.isFinite(lat) && Number.isFinite(lon) && inBrazil(lat, lon);
+
+  if (mode === 'photo') {
+    const name = String(b.name ?? '');
+    if (!/^places\/[A-Za-z0-9_-]{10,}\/photos\/[A-Za-z0-9_-]{10,}$/.test(name)) return json(400, { error: 'Foto inválida.' });
+    if (!(await withinQuota(req, 'google_photo', LIMITS.photo))) return json(429, { error: 'Limite diário de fotos do Google atingido para esta conta. Tente amanhã.' });
+    const r = await fetch('https://places.googleapis.com/v1/' + name + '/media?maxWidthPx=800&maxHeightPx=500&skipHttpRedirect=true', { headers: { 'X-Goog-Api-Key': key } });
+    if (!r.ok) {
+      console.error(JSON.stringify({ event: 'postos-google-error', mode, status: r.status }));
+      return json(r.status === 429 ? 429 : 502, { error: r.status === 429 ? 'A cota diária do Google do app acabou. Volta a funcionar amanhã.' : 'O Google não devolveu a foto agora.' });
+    }
+    const d = await r.json();
+    return json(200, { configured: true, uri: d.photoUri ?? null });
+  }
 
   let url: string, fields: string, body: Record<string, unknown>;
   if (mode === 'nearby') {

@@ -5,7 +5,7 @@ import {
   type Base, type CarModel, type Fuel, type LatLon, type Option, type OwnPrice, type Recommendation, type Station, type StationRow, type StationsFile,
 } from './postos';
 import { gps, loadStations, reverse, route, searchPlaces, type FoundPlace, type Route } from './lugares';
-import { currentSession, getPlaces, googlePlaces, setPlace, type PlaceKind, type Places } from './sync';
+import { currentSession, getPlaces, googlePhoto, googlePlaces, setPlace, type PlaceKind, type Places } from './sync';
 import { ICON } from './icons';
 import { getMeta, setMeta, type FuelLog } from './db';
 
@@ -147,7 +147,7 @@ export function initPostos(ctx: Ctx) {
   /* ---------- notas do Google (quando configuradas) ---------- */
   /* Cache do Google no aparelho: cada área (e cada posto procurado) é buscada no máximo uma vez por semana. */
   const G_TTL = 7 * 86400000;
-  const G_KEY = 'google_cache';
+  const G_KEY = 'google_cache_v2'; // v2: resultados com foto
   type GCache = Record<string, { at: number; places: GoogleStation[] }>;
   let gcache: GCache | null = null;
   let gBlocked = '';
@@ -489,6 +489,7 @@ export function initPostos(ctx: Ctx) {
     const dist = 'base' in rs ? (b.kind === 'rota' ? (row.distKm < 0.15 ? 'no caminho' : '+' + kmTxt(row.extraKm) + ' de desvio') : kmTxt(row.distKm)) : '';
     $('posto-title').textContent = nm(s);
     $('posto-body').innerHTML =
+      (gm?.photo ? '<figure class="ps-photo" id="ps-photo"><div class="ph"></div><figcaption>Foto: ' + esc(gm.photo.author || 'Google') + ' · Google</figcaption></figure>' : '') +
       '<div class="ps-head"><h2>' + esc(nm(s)) + '</h2>' + (gm && gm.name !== s.n ? '<span class="hint">No cadastro da ANP: ' + esc(s.n) + '</span>' : '') + '<span class="hint">' + [s.e, s.br, s.m].filter(Boolean).map(esc).join(', ') + '</span><span class="hint">' + [dist, s.b].filter(Boolean).map(esc).join(' · ') + (s.pg === 'b' ? ' · localização aproximada (bairro)' : '') + '</span></div>' +
       '<div class="price-grid">' + (car.fuels.includes('gasolina') ? priceCell('gasolina', row.gas) : '') + (car.fuels.includes('etanol') ? priceCell('etanol', row.eth) : '') + '</div>' +
       (extra ? '<p class="hint">Também: ' + esc(extra) + '</p>' : '') +
@@ -500,6 +501,7 @@ export function initPostos(ctx: Ctx) {
       '<div class="rel-part"><div class="h"><span>Avaliações no Google</span><b>' + (g ? fmt(g.rating, 1) : '–') + '</b></div>' +
       (g ? '<div class="bar"><i style="width:' + Math.round((g.rating / 5) * 100) + '%"></i></div><span class="hint">' + fmt(g.rating, 1) + ' em ' + g.count.toLocaleString('pt-BR') + ' avaliações</span>' : '<span class="hint">' + (gBlocked ? esc(gBlocked) : googleOn ? (gTried.has(s.c) && !gm ? 'Não encontrei este posto no Google.' : 'Procurando no Google…') : googleOn === false ? 'Ainda não configurado: a nota usa só a fiscalização.' : 'Disponível com a conta conectada.') + '</span>') + '</div>' +
       '<details class="more"><summary>Como a nota é calculada<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></summary><p class="hint">Começa em 5 e cada ocorrência da ANP nos últimos 5 anos desconta, mais quanto mais recente e mais grave: interdição e apreensão pesam mais; infração ligada ao combustível pesa mais que infração de papelada; notificação e medida corretiva pesam pouco. Infração de aferição da bomba, volume ou qualidade do combustível nos últimos 12 meses limita a nota em 2,5 e tira o posto da recomendação. Com o Google ligado, a média das avaliações entra com peso de 35%, puxada para 4,0 quando há poucas avaliações.</p></details></div>' +
+      '<div class="card"><div class="card-head"><span>Como chegar</span><span class="hint" id="ps-eta"></span></div><div class="ps-map" id="ps-map" role="img" aria-label="Mapa com o posto e o caminho até ele"></div><span class="hint" id="ps-map-note"></span></div>' +
       '<div class="card"><span class="b15">Seus abastecimentos aqui</span>' +
       (() => {
         const u = ctx.usage().find((x) => x.station_id === s.c);
@@ -512,7 +514,88 @@ export function initPostos(ctx: Ctx) {
       })() +
       (mine.length ? '<ul class="ev-list">' + mine.slice(0, 5).map((f) => '<li><span class="d">' + dm(f.date) + '/' + f.date.slice(2, 4) + '</span><span>' + FUEL[f.fuel as Fuel] + ' · ' + brl(f.price_per_l) + '/l · ' + brl(f.total_brl) + '</span></li>').join('') + '</ul>' : '<span class="hint">Nenhum ainda. Abastecendo por aqui, o preço que você pagar passa a valer como o dado mais recente deste posto.</span>') + '</div>';
     ctx.openSheet('posto-sheet');
+    if (gm?.photo) showPhoto(gm.photo);
+    setTimeout(() => showMap(s), 280); // depois da animação da folha, para o mapa saber o próprio tamanho
   }
+  /* ---------- foto e mapa da ficha ---------- */
+  const photoUris = new Map<string, string | null>();
+  async function showPhoto(ph: { name: string }) {
+    let uri = photoUris.get(ph.name);
+    if (uri === undefined && !gBlocked) {
+      try {
+        uri = await googlePhoto(ph.name);
+      } catch (e) {
+        await gError(e);
+        uri = null;
+      }
+      photoUris.set(ph.name, uri ?? null);
+    }
+    const fig = document.getElementById('ps-photo');
+    if (!fig) return;
+    if (!uri) return fig.remove();
+    const img = new Image();
+    img.alt = 'Foto do posto';
+    img.decoding = 'async';
+    img.onload = () => fig.querySelector('.ph')?.replaceWith(img);
+    img.onerror = () => fig.remove();
+    img.src = uri;
+  }
+
+  let leaflet: typeof import('leaflet') | null = null;
+  let map: import('leaflet').Map | null = null;
+  const routes = new Map<string, { pts: [number, number][]; km: number; min: number } | null>();
+  async function showMap(s: Station) {
+    const el = document.getElementById('ps-map');
+    if (!el || shown?.c !== s.c) return;
+    if (!leaflet) {
+      [leaflet] = await Promise.all([import('leaflet'), import('leaflet/dist/leaflet.css')]);
+    }
+    const L = leaflet;
+    map?.remove();
+    // sem animações: a ficha pode fechar ou trocar de posto no meio de uma, e o Leaflet quebra
+    map = L.map(el, { zoomControl: false, attributionControl: true, scrollWheelZoom: false, zoomAnimation: false, fadeAnimation: false, markerZoomAnimation: false });
+    map.attributionControl.setPrefix(false);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+    const dest: [number, number] = [s.la, s.lo];
+    L.circleMarker(dest, { radius: 9, color: '#FFFFFF', weight: 3, fillColor: '#C2410C', fillOpacity: 1 }).addTo(map).bindTooltip(nm(s), { direction: 'top', offset: [0, -8] });
+    // Origem: GPS recente; senão, o lugar de onde você está buscando (casa, trabalho ou o local escolhido)
+    const fresh = here && Date.now() - here.at < 15 * 60000 ? here.p : null;
+    const rs = resolve(base);
+    const fromBase = base === 'rota' ? place('casa') : 'center' in rs ? rs.center : null;
+    const origin = fresh ?? fromBase;
+    const label = fresh ? 'de onde você está' : base === 'casa' || base === 'rota' ? 'de casa' : base === 'trabalho' ? 'do trabalho' : 'do local escolhido';
+    const eta = document.getElementById('ps-eta')!, note = document.getElementById('ps-map-note')!;
+    if (!origin) {
+      map.setView(dest, 15);
+      note.innerHTML = 'Use <b>Agora</b> na aba Postos para ver o caminho a partir de onde você está.';
+      return;
+    }
+    const o: [number, number] = [origin.lat, origin.lon];
+    L.circleMarker(o, { radius: 7, color: '#FFFFFF', weight: 3, fillColor: '#1D4ED8', fillOpacity: 1 }).addTo(map);
+    map.fitBounds(L.latLngBounds([o, dest]).pad(0.25));
+    const key = o.map((x) => x.toFixed(4)).join(',') + '>' + s.c;
+    let r = routes.get(key);
+    if (r === undefined) {
+      eta.textContent = 'calculando…';
+      try {
+        r = await route(origin, { lat: s.la, lon: s.lo });
+      } catch {
+        r = null;
+      }
+      routes.set(key, r);
+    }
+    if (!map || shown?.c !== s.c) return;
+    if (!r) {
+      eta.textContent = '';
+      note.textContent = navigator.onLine === false ? 'Sem internet para calcular o caminho.' : 'Não consegui calcular o caminho agora.';
+      return;
+    }
+    const line = L.polyline(r.pts, { color: '#1D4ED8', weight: 5, opacity: 0.85 }).addTo(map);
+    map.fitBounds(line.getBounds().extend(dest).extend(o).pad(0.15));
+    eta.textContent = '≈ ' + (r.min < 1 ? '1' : r.min) + ' min · ' + fmt(r.km, 1) + ' km';
+    note.textContent = 'De carro, ' + label + ', sem contar trânsito. Para navegar, toque em Abrir no Maps.';
+  }
+
   /** Busca pontual de um posto que a busca por perto não trouxe (o Google devolve no máximo 20 por área). */
   async function lookupStation(s: Station) {
     gTried.add(s.c);

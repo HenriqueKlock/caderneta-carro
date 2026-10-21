@@ -421,3 +421,12 @@ nav.tabbar .in { max-width: 560px; margin: 0 auto; display: grid; grid-template-
 .my-card .s.ok, .hint.ok { color: var(--ok-ink); }
 .my-card .s.bad, .hint.bad { color: var(--bad-ink); }
 .tag.mine { color: var(--link); border-color: var(--link); vertical-align: 2px; margin-right: 4px; }
+
+.ps-photo { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.ps-photo img, .ps-photo .ph { width: 100%; aspect-ratio: 16 / 9; border-radius: 18px; object-fit: cover; display: block; background: var(--sunken); }
+.ps-photo .ph { animation: pulse 1.2s ease-in-out infinite alternate; }
+.ps-photo figcaption { font-size: 11px; color: var(--faint); text-align: right; }
+@keyframes pulse { from { opacity: .55; } to { opacity: 1; } }
+.ps-map { height: 230px; border-radius: 14px; overflow: hidden; background: var(--sunken); z-index: 0; }
+.ps-map .leaflet-control-attribution { font-size: 10px; }
+@media (prefers-color-scheme: dark) { .ps-map .leaflet-tile { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); } }

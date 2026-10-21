@@ -373,6 +373,13 @@ async function syncPlaces() {
 
 /* ---------- Google Places (opcional: só funciona com a chave configurada no servidor) ---------- */
 export type GoogleMode = 'nearby' | 'posto' | 'address';
+/** Link temporário (do Google) para a foto de um lugar; null quando não há. */
+export async function googlePhoto(name: string): Promise<string | null> {
+  if (!(await currentSession())) return null;
+  const { data, error } = await supabase.functions.invoke('postos-google', { body: { mode: 'photo', name } });
+  if (error) throw error;
+  return (data as { uri?: string | null }).uri ?? null;
+}
 /** Chama a função postos-google; sem login ou sem chave devolve configured=false. */
 export async function googlePlaces<T>(body: { mode: GoogleMode; lat?: number; lon?: number; radius_m?: number; query?: string }): Promise<{ configured: boolean; places: T[] }> {
   if (!(await currentSession())) return { configured: false, places: [] };

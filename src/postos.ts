@@ -381,8 +381,9 @@ export function recommend(rows: StationRow[]): Recommendation {
 }
 
 /* ---------- casar postos do Google com os da ANP ---------- */
-export interface GoogleStation { id: string; name: string; address: string; lat: number; lon: number; rating: number | null; count: number }
-export interface GoogleMatch { id: string; name: string; rating: number | null; count: number; lat: number; lon: number }
+export interface GooglePhoto { name: string; author: string; authorUri: string }
+export interface GoogleStation { id: string; name: string; address: string; lat: number; lon: number; rating: number | null; count: number; photo?: GooglePhoto | null }
+export interface GoogleMatch { id: string; name: string; rating: number | null; count: number; lat: number; lon: number; photo?: GooglePhoto | null }
 
 const STOP = new Set('posto postos auto autoposto ltda me epp eireli sa s a comercio com de da do das dos e combustiveis combustivel derivados petroleo servicos servico serv conveniencia rede abastecimento center centro and the loja filial'.split(' '));
 const BRANDS: Record<string, string> = { shell: 'Shell', raizen: 'Shell', ipiranga: 'Ipiranga', petrobras: 'Petrobras', br: 'Petrobras', vibra: 'Petrobras', ale: 'Ale', alesat: 'Ale' };
@@ -432,7 +433,7 @@ export function matchGoogle(places: GoogleStation[], stations: Station[]): Map<s
   for (const { g, s } of pairs) {
     if (usedG.has(g.id) || out.has(s.c)) continue;
     usedG.add(g.id);
-    out.set(s.c, { id: g.id, name: g.name, rating: g.rating, count: g.count, lat: g.lat, lon: g.lon });
+    out.set(s.c, { id: g.id, name: g.name, rating: g.rating, count: g.count, lat: g.lat, lon: g.lon, photo: g.photo ?? null });
   }
   return out;
 }
