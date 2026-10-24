@@ -1,6 +1,6 @@
 Cadastro de revendedores…
   colunas do cadastro: {'cnpj': 'CNPJ', 'razao': 'RAZAOSOCIAL', 'fantasia': None, 'bandeira': 'BANDEIRA', 'end': 'ENDERECO', 'num': None, 'bairro': 'BAIRRO', 'cep': 'CEP', 'mun': 'MUNICIPIO', 'uf': 'UF', 'comp': 'COMPLEMENTO'}
-  2095 postos em SC
+  2097 postos em SC
 Levantamento de preços…
   semanas: ['2026-10-04→2026-10-10', '2026-09-27→2026-10-03', '2026-09-20→2026-09-26', '2026-09-13→2026-09-19', '2026-09-06→2026-09-12', '2026-08-30→2026-09-05']
   2026-10-04: 647 preços em 174 postos
@@ -11,21 +11,11 @@ Levantamento de preços…
   2026-08-30: 646 preços em 172 postos
 Fiscalização…
   HEAD falhou: HTTP Error 403: Forbidden
-  baixado 15 MB em 18s
-  fiscalização: 244247 linhas lidas, 3200 da(s) UF(s) desde 2021-10-21, 1103 CNPJs
-  gravado estado/fisc-SC.json (199 KB)
+  baixado 15 MB em 17s
+  fiscalização: 244247 linhas lidas, 3190 da(s) UF(s) desde 2021-10-25, 1098 CNPJs
+  gravado estado/fisc-SC.json (198 KB)
 Coordenadas…
-  557 postos sem coordenada (limite desta rodada: 3000 consultas)
-  100 processados, 263 consultas
-  gravado estado/geocache.json (247 KB)
-  200 processados, 528 consultas
-  gravado estado/geocache.json (248 KB)
-  300 processados, 787 consultas
-  gravado estado/geocache.json (249 KB)
-  400 processados, 1041 consultas
-  gravado estado/geocache.json (250 KB)
-  500 processados, 1294 consultas
-  gravado estado/geocache.json (251 KB)
+  4 postos sem coordenada (limite desta rodada: 3000 consultas)
   gravado estado/geocache.json (255 KB)
   gravado estado/postos-SC.json (482 KB)
-Resumo: {"cadastro": 2101, "com_local": 1863, "sem_local": 238, "com_preco": 217}
+Resumo: {"cadastro": 2103, "com_local": 1866, "sem_local": 237, "com_preco": 217}
