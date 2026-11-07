@@ -11,11 +11,11 @@ Levantamento de preços…
   2026-08-30: 646 preços em 172 postos
 Fiscalização…
   HEAD falhou: HTTP Error 403: Forbidden
-  baixado 15 MB em 17s
-  fiscalização: 244247 linhas lidas, 3161 da(s) UF(s) desde 2021-11-04, 1092 CNPJs
+  baixado 15 MB em 24s
+  fiscalização: 244247 linhas lidas, 3160 da(s) UF(s) desde 2021-11-08, 1092 CNPJs
   gravado estado/fisc-SC.json (196 KB)
 Coordenadas…
-  1 postos sem coordenada (limite desta rodada: 3000 consultas)
-  gravado estado/geocache.json (255 KB)
+  2 postos sem coordenada (limite desta rodada: 3000 consultas)
+  gravado estado/geocache.json (256 KB)
   gravado estado/postos-SC.json (481 KB)
 Resumo: {"cadastro": 2103, "com_local": 1866, "sem_local": 237, "com_preco": 217}
