@@ -1,0 +1,19 @@
+node:internal/deps/undici/undici:15456
+      Error.captureStackTrace(err);
+            ^
+
+TypeError: fetch failed
+    at node:internal/deps/undici/undici:15456:13
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async call (file:///home/runner/work/caderneta-carro/caderneta-carro/tests/blackbox.mjs:20:13)
+    at async file:///home/runner/work/caderneta-carro/caderneta-carro/tests/blackbox.mjs:30:15 {
+  [cause]: Error: getaddrinfo ENOTFOUND zzohdjtrddnonaifliad.supabase.co
+      at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26) {
+    errno: -3008,
+    code: 'ENOTFOUND',
+    syscall: 'getaddrinfo',
+    hostname: 'zzohdjtrddnonaifliad.supabase.co'
+  }
+}
+
+Node.js v22.23.4
