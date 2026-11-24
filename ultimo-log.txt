@@ -1,21 +1,14 @@
 Cadastro de revendedores…
-  colunas do cadastro: {'cnpj': 'CNPJ', 'razao': 'RAZAOSOCIAL', 'fantasia': None, 'bandeira': 'BANDEIRA', 'end': 'ENDERECO', 'num': None, 'bairro': 'BAIRRO', 'cep': 'CEP', 'mun': 'MUNICIPIO', 'uf': 'UF', 'comp': 'COMPLEMENTO'}
-  2095 postos em SC
-Levantamento de preços…
-  semanas: ['2026-10-04→2026-10-10', '2026-09-27→2026-10-03', '2026-09-20→2026-09-26', '2026-09-13→2026-09-19', '2026-09-06→2026-09-12', '2026-08-30→2026-09-05']
-  2026-10-04: 647 preços em 174 postos
-  2026-09-27: 657 preços em 173 postos
-  2026-09-20: 661 preços em 176 postos
-  2026-09-13: 663 preços em 175 postos
-  2026-09-06: 659 preços em 175 postos
-  2026-08-30: 646 preços em 172 postos
-Fiscalização…
-  HEAD falhou: HTTP Error 403: Forbidden
-  baixado 15 MB em 17s
-  fiscalização: 244247 linhas lidas, 3155 da(s) UF(s) desde 2021-11-22, 1088 CNPJs
-  gravado estado/fisc-SC.json (196 KB)
-Coordenadas…
-  0 postos sem coordenada (limite desta rodada: 3000 consultas)
-  gravado estado/geocache.json (256 KB)
-  gravado estado/postos-SC.json (481 KB)
-Resumo: {"cadastro": 2102, "com_local": 1867, "sem_local": 235, "com_preco": 217}
+  falhou (<urlopen error [Errno 104] Connection reset by peer>); tentando de novo em 5s
+  falhou (<urlopen error [Errno 104] Connection reset by peer>); tentando de novo em 10s
+  falhou (<urlopen error [Errno 104] Connection reset by peer>); tentando de novo em 15s
+  falhou (<urlopen error [Errno 104] Connection reset by peer>); tentando de novo em 20s
+Traceback (most recent call last):
+  File "/home/runner/work/caderneta-carro/caderneta-carro/pipeline/postos.py", line 656, in <module>
+    main()
+  File "/home/runner/work/caderneta-carro/caderneta-carro/pipeline/postos.py", line 532, in main
+    raw = open(a.cad, 'rb').read() if a.cad else http_get(CAD_URL)
+                                                 ^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/caderneta-carro/caderneta-carro/pipeline/postos.py", line 100, in http_get
+    raise RuntimeError(f'não consegui baixar {url}: {last}')
+RuntimeError: não consegui baixar https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/arquivos/arquivos-dados-cadastrais-dos-revendedores-varejistas-de-combustiveis-automotivos/dados-cadastrais-revendedores-varejistas-combustiveis-automoveis.csv: <urlopen error [Errno 104] Connection reset by peer>
